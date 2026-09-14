@@ -43,7 +43,9 @@ const TransactionItem: React.FC<{ transaction: Transaction; onEdit: (transaction
             <p className={`font-bold text-lg ${amountColor}`}>
             {sign} {transaction.amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
             </p>
-            {transaction.paymentMethod && <p className="text-xs text-gray-500">{transaction.paymentMethod}</p>}
+            {transaction.paymentMethod && (!isIncome || transaction.paymentMethod !== PaymentMethod.CREDIT_CARD) && (
+              <p className="text-xs text-gray-500">{isIncome ? 'Entrada em Conta' : transaction.paymentMethod}</p>
+            )}
         </div>
         <div className="flex items-center gap-3">
              <button
@@ -112,7 +114,13 @@ const TransactionList: React.FC<TransactionListProps> = ({ transactions, onEdit,
 
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFilters(prev => ({ ...prev, [name]: value }));
+    setFilters(prev => {
+      const updated = { ...prev, [name]: value };
+      if (name === 'type' && value === TransactionType.INCOME && updated.paymentMethod === PaymentMethod.CREDIT_CARD) {
+        updated.paymentMethod = '';
+      }
+      return updated;
+    });
   };
 
   const resetFilters = () => {
@@ -161,9 +169,16 @@ const TransactionList: React.FC<TransactionListProps> = ({ transactions, onEdit,
   }, [transactions, allCategories]);
   
   const uniquePaymentMethods = useMemo(() => {
-    const methods = new Set(transactions.map(t => t.paymentMethod).filter(Boolean));
+    let relevantTxs = transactions;
+    if (filters.type === TransactionType.INCOME) {
+      relevantTxs = transactions.filter(t => t.type === TransactionType.INCOME);
+    }
+    const methods = new Set(relevantTxs.map(t => t.paymentMethod).filter(Boolean));
+    if (filters.type === TransactionType.INCOME) {
+      methods.delete(PaymentMethod.CREDIT_CARD);
+    }
     return Array.from(methods) as PaymentMethod[];
-  }, [transactions]);
+  }, [transactions, filters.type]);
 
 
   return (

@@ -47,22 +47,44 @@ const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   useEffect(() => {
     if (isEditing && transactionToEdit) {
       const t = transactionToEdit;
+      const isIncome = t.type === TransactionType.INCOME;
       setDescription(t.description);
       setAmount(String(t.amount));
       setDate(t.date);
       setCategory(t.category);
-      setPaymentMethod(t.paymentMethod || PaymentMethod.CASH);
-      setCreditCardId(t.creditCardId || (creditCards.length > 0 ? creditCards[0].id : ''));
-      setFormType(t.type === TransactionType.INCOME ? 'income' : 'expense');
+      setPaymentMethod(isIncome ? PaymentMethod.CASH : (t.paymentMethod || PaymentMethod.CASH));
+      setCreditCardId(isIncome ? '' : (t.creditCardId || (creditCards.length > 0 ? creditCards[0].id : '')));
+      setFormType(isIncome ? 'income' : 'expense');
     } else if (transactionToPrefill) {
+      const isIncome = transactionToPrefill.type === TransactionType.INCOME;
       setDescription(transactionToPrefill.description || '');
       setAmount(String(transactionToPrefill.amount || ''));
       setDate(transactionToPrefill.date || new Date().toISOString().split('T')[0]);
       setCategory(transactionToPrefill.category || (allCategories.length > 0 ? allCategories[0].id : ''));
-      setPaymentMethod(transactionToPrefill.paymentMethod || PaymentMethod.CASH);
-      setFormType(transactionToPrefill.type === TransactionType.INCOME ? 'income' : 'expense');
+      setPaymentMethod(isIncome ? PaymentMethod.CASH : (transactionToPrefill.paymentMethod || PaymentMethod.CASH));
+      setCreditCardId(isIncome ? '' : (transactionToPrefill.creditCardId || (creditCards.length > 0 ? creditCards[0].id : '')));
+      setFormType(isIncome ? 'income' : 'expense');
     }
   }, [isEditing, transactionToEdit, transactionToPrefill, creditCards, allCategories]);
+
+  const handleTabChange = (newType: FormType) => {
+    setFormType(newType);
+    if (newType === 'income') {
+      // Income can never be paid by credit card
+      setPaymentMethod(PaymentMethod.CASH);
+      setCreditCardId('');
+    } else if (newType === 'installment') {
+      // Installments require credit card
+      setPaymentMethod(PaymentMethod.CREDIT_CARD);
+      if (!creditCardId && creditCards.length > 0) {
+        setCreditCardId(creditCards[0].id);
+      }
+    } else if (newType === 'expense' || newType === 'recurring') {
+      if (paymentMethod === PaymentMethod.CREDIT_CARD && !creditCardId && creditCards.length > 0) {
+        setCreditCardId(creditCards[0].id);
+      }
+    }
+  };
 
   useEffect(() => {
     if (isEditing || transactionToPrefill) return;
@@ -122,20 +144,16 @@ const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     }
 
     if (isEditing && transactionToEdit) {
+      const isIncome = formType === 'income';
       const updatedTransaction: Transaction = {
         ...transactionToEdit,
         description,
         amount: numericAmount,
         date,
         category,
-        paymentMethod:
-          transactionToEdit.type === TransactionType.INCOME ? transactionToEdit.paymentMethod : paymentMethod,
-        creditCardId:
-          transactionToEdit.type === TransactionType.INCOME
-            ? null
-            : paymentMethod === PaymentMethod.CREDIT_CARD
-            ? creditCardId
-            : null,
+        type: isIncome ? TransactionType.INCOME : TransactionType.EXPENSE,
+        paymentMethod: isIncome ? PaymentMethod.CASH : paymentMethod,
+        creditCardId: isIncome ? null : (paymentMethod === PaymentMethod.CREDIT_CARD ? creditCardId : null),
       };
       onUpdateTransaction(updatedTransaction);
     } else {
@@ -280,7 +298,7 @@ const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 bg-slate-900/80 rounded-2xl border border-white/[0.08]">
                 <button
                   type="button"
-                  onClick={() => setFormType('expense')}
+                  onClick={() => handleTabChange('expense')}
                   className={`py-2 px-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
                     formType === 'expense'
                       ? 'bg-gradient-to-r from-rose-600 to-red-600 text-white shadow-md shadow-rose-600/30'
@@ -292,7 +310,7 @@ const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setFormType('income')}
+                  onClick={() => handleTabChange('income')}
                   className={`py-2 px-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
                     formType === 'income'
                       ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-600/30'
@@ -304,7 +322,7 @@ const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setFormType('installment')}
+                  onClick={() => handleTabChange('installment')}
                   className={`py-2 px-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
                     formType === 'installment'
                       ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md shadow-indigo-600/30'
@@ -316,7 +334,7 @@ const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setFormType('recurring')}
+                  onClick={() => handleTabChange('recurring')}
                   className={`py-2 px-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
                     formType === 'recurring'
                       ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-md shadow-blue-600/30'
@@ -494,8 +512,8 @@ const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
               </div>
             )}
 
-            {/* Credit Card Selector */}
-            {(paymentMethod === PaymentMethod.CREDIT_CARD || formType === 'installment') && (
+            {/* Credit Card Selector (Never for Income) */}
+            {formType !== 'income' && (paymentMethod === PaymentMethod.CREDIT_CARD || formType === 'installment') && (
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
                   Cartão de Crédito
