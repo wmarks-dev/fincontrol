@@ -258,7 +258,20 @@ const AppContent: React.FC = () => {
       case 'recurring': return <RecurringManagement recurringTransactions={data.recurringTransactions} onCancel={handleCancelRecurringTransaction} allCategories={data.allCategories} />;
       case 'savings': return <SavingsManagement savingsTransactions={data.savingsTransactions} onOpenModal={(type) => setSavingsModalProps({ isOpen: true, type })} />;
       case 'loans': return <LoansManagement loans={data.loans} loanPayments={data.loanPayments} onAddLoan={() => setAddLoanModalOpen(true)} onRegisterPayment={(loan) => setLoanPaymentModalProps({ isOpen: true, loan })}/>;
-      case 'bills': return <BillsManagement bills={data.bills} onAdd={() => setAddBillModalProps({isOpen: true, billToEdit: null})} onEdit={(bill) => setAddBillModalProps({isOpen: true, billToEdit: bill})} onDelete={handleDeleteBill} allCategories={data.allCategories} />;
+      case 'bills': return (
+        <BillsManagement
+          bills={data.bills}
+          billPayments={data.billPayments}
+          allCategories={data.allCategories}
+          onAdd={() => setAddBillModalProps({ isOpen: true, billToEdit: null })}
+          onEdit={(bill) => setAddBillModalProps({ isOpen: true, billToEdit: bill })}
+          onDelete={handleDeleteBill}
+          onPayBill={handlePayBill}
+          onToggleStatus={(bill) =>
+            data.updateBill({ ...bill, status: bill.status === 'active' ? 'inactive' : 'active' })
+          }
+        />
+      );
       case 'budget': return <BudgetManagement
         budgets={data.budgets}
         transactions={data.transactions}
