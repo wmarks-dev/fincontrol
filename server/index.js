@@ -883,11 +883,21 @@ app.delete('/api/categories/:id', async (req, res) => {
 });
 
 // Start server
-app.listen(PORT, async () => {
+const start = async () => {
   try {
     await initDb();
-    console.log(`[FinControl SQLite Server] Banco inicializado e rodando na porta ${PORT}`);
+    console.log('[FinControl SQLite Server] Banco inicializado com sucesso.');
+    const server = app.listen(PORT, '0.0.0.0', () => {
+      console.log(`[FinControl SQLite Server] Rodando em http://localhost:${PORT}`);
+    });
+    server.on('error', (err) => {
+      console.error('[FinControl SQLite Server] Erro no servidor:', err);
+    });
   } catch (err) {
-    console.error('[FinControl SQLite Server] Erro ao inicializar banco de dados:', err);
+    console.error('[FinControl SQLite Server] Erro fatal ao iniciar:', err);
+    process.exit(1);
   }
-});
+};
+
+start();
+
