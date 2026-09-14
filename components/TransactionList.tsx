@@ -53,6 +53,36 @@ const getDayLabel = (dateStr: string) => {
   return `${weekday.charAt(0).toUpperCase() + weekday.slice(1)}, ${dayMonth}`;
 };
 
+// Helper to extract installment information and clean description
+const getInstallmentData = (description: string, isIncome: boolean, installmentId?: string) => {
+  if (isIncome) {
+    return {
+      installmentStr: '-',
+      cleanDescription: description || '',
+    };
+  }
+
+  const match = (description || '').match(/\s+(\d+)\s*(?:\/|de)\s*(\d+)\s*$/i);
+  if (match) {
+    return {
+      installmentStr: `${match[1]}/${match[2]}`,
+      cleanDescription: description.replace(/\s+\d+\s*(?:\/|de)\s*\d+\s*$/i, '').trim() || description,
+    };
+  }
+
+  if (installmentId) {
+    return {
+      installmentStr: 'Parcelada',
+      cleanDescription: description || '',
+    };
+  }
+
+  return {
+    installmentStr: '-',
+    cleanDescription: description || '',
+  };
+};
+
 interface TransactionItemProps {
   transaction: Transaction;
   onEdit: (transaction: Transaction) => void;
@@ -69,6 +99,11 @@ const TransactionItem: React.FC<TransactionItemProps> = ({
   const category = allCategories.find((c) => c.id === transaction.category);
   const isIncome = transaction.type === TransactionType.INCOME;
   const canBeEdited = !transaction.installmentId && !transaction.recurringId;
+  const { installmentStr, cleanDescription } = getInstallmentData(
+    transaction.description,
+    isIncome,
+    transaction.installmentId
+  );
 
   return (
     <div className="group bg-slate-900/60 hover:bg-slate-800/80 p-3.5 sm:p-4 rounded-2xl border border-white/[0.05] hover:border-white/[0.12] transition-all duration-200 flex items-center justify-between gap-3">
@@ -87,7 +122,7 @@ const TransactionItem: React.FC<TransactionItemProps> = ({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="font-bold text-sm text-slate-100 truncate group-hover:text-white transition-colors">
-              {transaction.description}
+              {cleanDescription}
             </p>
 
             {/* Recurring Tag */}
@@ -102,7 +137,7 @@ const TransactionItem: React.FC<TransactionItemProps> = ({
             {transaction.installmentId && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
                 <i className="fa-solid fa-layer-group text-[9px]"></i>
-                <span>Parcelada</span>
+                <span>{installmentStr !== '-' && installmentStr !== 'Parcelada' ? `Parcela ${installmentStr}` : 'Parcelada'}</span>
               </span>
             )}
           </div>
@@ -339,18 +374,25 @@ const TransactionList: React.FC<TransactionListProps> = ({
 
   // CSV Export utility
   const handleExportCSV = () => {
-    const headers = ['Data', 'Tipo', 'Descrição', 'Categoria', 'Forma de Pagamento', 'Valor'];
+    const headers = ['Data', 'Tipo', 'Descrição', 'Categoria', 'Forma de Pagamento', 'Parcela', 'Valor'];
     const rows = filteredTransactions.map((t) => {
       const cat = allCategories.find((c) => c.id === t.category)?.name || t.category;
       const typeLabel = t.type === TransactionType.INCOME ? 'Receita' : 'Despesa';
       const dateFormatted = new Date(t.date).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
       const formattedAmount = t.amount.toFixed(2).replace('.', ',');
+      const { installmentStr, cleanDescription } = getInstallmentData(
+        t.description,
+        t.type === TransactionType.INCOME,
+        t.installmentId
+      );
+
       return [
         `"${dateFormatted}"`,
         `"${typeLabel}"`,
-        `"${(t.description || '').replace(/"/g, '""')}"`,
+        `"${(cleanDescription || '').replace(/"/g, '""')}"`,
         `"${cat}"`,
         `"${t.type === TransactionType.INCOME ? 'Entrada' : t.paymentMethod || ''}"`,
+        `"${installmentStr}"`,
         `"${formattedAmount}"`,
       ].join(';');
     });
