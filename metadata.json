@@ -1,0 +1,6 @@
+{
+  "name": "FinControl - Seu Gestor Financeiro",
+  "description": "Um aplicativo completo para controle financeiro pessoal, permitindo o gerenciamento de entradas, saídas, compras parceladas, faturas de cartão de crédito e despesas recorrentes. Tenha uma visão clara da sua saúde financeira com uma interface moderna e responsiva.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}

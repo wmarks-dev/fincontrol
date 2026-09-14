@@ -1,0 +1,31 @@
+{
+  "name": "fincontrol---seu-gestor-financeiro",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n \"SERVER,VITE\" -c \"blue,green\" \"node server/index.js\" \"vite\"",
+    "server": "node server/index.js",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "firebase": "^12.0.0",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "recharts": "2.12.7",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^6.0.1",
+    "uuid": "9.0.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.14.0",
+    "concurrently": "^9.2.4",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  }
+}
