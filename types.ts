@@ -102,6 +102,15 @@ export interface BillPayment {
   billId: string;
   year: number;
   month: number; // 0-11
+  amount?: number;
+}
+
+export interface BillMonthlyAmount {
+  id: string;
+  billId: string;
+  year: number;
+  month: number; // 0-11
+  amount: number;
 }
 
 export interface Budget {

@@ -89,7 +89,8 @@ const AppContent: React.FC = () => {
       data.setPendingBillPayment(null);
   }
 
-  const handlePayBill = (bill: Bill, nextDueDate: Date) => {
+  const handlePayBill = (bill: Bill, nextDueDate: Date, customAmount?: number) => {
+      const amountToUse = typeof customAmount === 'number' && customAmount > 0 ? customAmount : bill.estimatedAmount;
       data.setPendingBillPayment({
         billId: bill.id,
         year: nextDueDate.getUTCFullYear(),
@@ -97,7 +98,7 @@ const AppContent: React.FC = () => {
       });
       setPrefillingTransaction({
         description: `Pagamento - ${bill.name}`,
-        amount: bill.estimatedAmount,
+        amount: amountToUse,
         category: bill.category,
         date: nextDueDate.toISOString().split('T')[0],
         type: TransactionType.EXPENSE,
@@ -262,11 +263,14 @@ const AppContent: React.FC = () => {
         <BillsManagement
           bills={data.bills}
           billPayments={data.billPayments}
+          billMonthlyAmounts={data.billMonthlyAmounts}
           allCategories={data.allCategories}
           onAdd={() => setAddBillModalProps({ isOpen: true, billToEdit: null })}
           onEdit={(bill) => setAddBillModalProps({ isOpen: true, billToEdit: bill })}
           onDelete={handleDeleteBill}
           onPayBill={handlePayBill}
+          onSetMonthlyAmount={data.setBillMonthlyAmount}
+          onRemoveMonthlyAmount={data.removeBillMonthlyAmount}
           onToggleStatus={(bill) =>
             data.updateBill({ ...bill, status: bill.status === 'active' ? 'inactive' : 'active' })
           }

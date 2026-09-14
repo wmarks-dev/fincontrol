@@ -1,14 +1,17 @@
 import React, { useState, useMemo } from 'react';
-import { Bill, BillPayment, Category } from '../types';
+import { Bill, BillPayment, BillMonthlyAmount, Category } from '../types';
 
 interface BillsManagementProps {
   bills: Bill[];
   billPayments?: BillPayment[];
+  billMonthlyAmounts?: BillMonthlyAmount[];
   allCategories: Category[];
   onAdd: () => void;
   onEdit: (bill: Bill) => void;
   onDelete: (billId: string) => void;
-  onPayBill?: (bill: Bill, nextDueDate: Date) => void;
+  onPayBill?: (bill: Bill, nextDueDate: Date, customAmount?: number) => void;
+  onSetMonthlyAmount?: (billId: string, year: number, month: number, amount: number) => Promise<void>;
+  onRemoveMonthlyAmount?: (billId: string, year: number, month: number) => Promise<void>;
   onToggleStatus?: (bill: Bill) => void;
 }
 
@@ -43,11 +46,14 @@ const getCategoryColor = (categoryId: string) => {
 const BillsManagement: React.FC<BillsManagementProps> = ({
   bills,
   billPayments = [],
+  billMonthlyAmounts = [],
   allCategories,
   onAdd,
   onEdit,
   onDelete,
   onPayBill,
+  onSetMonthlyAmount,
+  onRemoveMonthlyAmount,
   onToggleStatus,
 }) => {
   const now = new Date();
@@ -55,6 +61,14 @@ const BillsManagement: React.FC<BillsManagementProps> = ({
   const [selectedMonth, setSelectedMonth] = useState<number>(now.getUTCMonth());
   const [filterType, setFilterType] = useState<FilterType>('all');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // State for the "Set Real Amount" modal
+  const [modalData, setModalData] = useState<{
+    bill: Bill;
+    currentRealAmount: number | null;
+  } | null>(null);
+  const [inputRealAmount, setInputRealAmount] = useState('');
+  const [isSavingRealAmount, setIsSavingRealAmount] = useState(false);
 
   // Today in UTC for accurate day calculations
   const todayUTC = useMemo(() => {
@@ -93,6 +107,49 @@ const BillsManagement: React.FC<BillsManagementProps> = ({
     return `${monthName.charAt(0).toUpperCase() + monthName.slice(1)} de ${selectedYear}`;
   }, [selectedYear, selectedMonth]);
 
+  // Open modal to set real amount
+  const handleOpenSetAmountModal = (bill: Bill, currentRealAmount: number | null) => {
+    setModalData({ bill, currentRealAmount });
+    setInputRealAmount(currentRealAmount !== null ? String(currentRealAmount) : String(bill.estimatedAmount));
+  };
+
+  const handleCloseSetAmountModal = () => {
+    setModalData(null);
+    setInputRealAmount('');
+    setIsSavingRealAmount(false);
+  };
+
+  const handleSaveRealAmount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!modalData || !onSetMonthlyAmount) return;
+
+    const numAmount = parseFloat(inputRealAmount.replace(',', '.'));
+    if (isNaN(numAmount) || numAmount <= 0) return;
+
+    setIsSavingRealAmount(true);
+    try {
+      await onSetMonthlyAmount(modalData.bill.id, selectedYear, selectedMonth, numAmount);
+      handleCloseSetAmountModal();
+    } catch (err) {
+      console.error('Erro ao salvar valor real da fatura:', err);
+    } finally {
+      setIsSavingRealAmount(false);
+    }
+  };
+
+  const handleResetRealAmount = async () => {
+    if (!modalData || !onRemoveMonthlyAmount) return;
+    setIsSavingRealAmount(true);
+    try {
+      await onRemoveMonthlyAmount(modalData.bill.id, selectedYear, selectedMonth);
+      handleCloseSetAmountModal();
+    } catch (err) {
+      console.error('Erro ao remover valor real da fatura:', err);
+    } finally {
+      setIsSavingRealAmount(false);
+    }
+  };
+
   // Compute status for all bills for the selected month
   const processedBills = useMemo(() => {
     const maxDays = new Date(Date.UTC(selectedYear, selectedMonth + 1, 0)).getUTCDate();
@@ -100,9 +157,21 @@ const BillsManagement: React.FC<BillsManagementProps> = ({
     return bills.map((bill) => {
       const effectiveDueDay = Math.min(bill.dueDay, maxDays);
       const dueDate = new Date(Date.UTC(selectedYear, selectedMonth, effectiveDueDay));
-      const isPaid = billPayments.some(
+
+      const payment = billPayments.find(
         (p) => p.billId === bill.id && p.year === selectedYear && p.month === selectedMonth
       );
+      const isPaid = !!payment;
+
+      const monthlyOverride = billMonthlyAmounts.find(
+        (m) => m.billId === bill.id && m.year === selectedYear && m.month === selectedMonth
+      );
+
+      // Real amount preference: monthly override first, then payment amount, then null
+      const realAmount = monthlyOverride?.amount ?? (payment?.amount ?? null);
+      const hasRealAmount = realAmount !== null;
+      const effectiveAmount = hasRealAmount ? realAmount : bill.estimatedAmount;
+      const difference = hasRealAmount ? realAmount - bill.estimatedAmount : 0;
 
       const diffTime = dueDate.getTime() - todayUTC.getTime();
       const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
@@ -130,31 +199,38 @@ const BillsManagement: React.FC<BillsManagementProps> = ({
         isPaid,
         diffDays,
         urgency,
+        realAmount,
+        hasRealAmount,
+        effectiveAmount,
+        difference,
       };
     }).sort((a, b) => {
-      // Sort: active first, then unpaid first, then by dueDay
       if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
       if (a.isPaid !== b.isPaid) return a.isPaid ? 1 : -1;
       return a.dueDay - b.dueDay;
     });
-  }, [bills, billPayments, selectedYear, selectedMonth, todayUTC]);
+  }, [bills, billPayments, billMonthlyAmounts, selectedYear, selectedMonth, todayUTC]);
 
   // Summary Metrics
   const stats = useMemo(() => {
     const activeBills = processedBills.filter((b) => b.status === 'active');
     const totalEstimated = activeBills.reduce((acc, b) => acc + b.estimatedAmount, 0);
+    const totalEffective = activeBills.reduce((acc, b) => acc + b.effectiveAmount, 0);
     const paidBills = activeBills.filter((b) => b.isPaid);
-    const totalPaid = paidBills.reduce((acc, b) => acc + b.estimatedAmount, 0);
+    const totalPaid = paidBills.reduce((acc, b) => acc + b.effectiveAmount, 0);
     const pendingBills = activeBills.filter((b) => !b.isPaid);
-    const totalPending = pendingBills.reduce((acc, b) => acc + b.estimatedAmount, 0);
+    const totalPending = pendingBills.reduce((acc, b) => acc + b.effectiveAmount, 0);
     const overdueBills = activeBills.filter((b) => b.urgency === 'overdue');
-    const percentPaid = totalEstimated > 0 ? Math.round((totalPaid / totalEstimated) * 100) : 0;
+    const percentPaid = totalEffective > 0 ? Math.round((totalPaid / totalEffective) * 100) : 0;
+    const diffTotal = totalEffective - totalEstimated;
 
     return {
       totalEstimated,
+      totalEffective,
       totalPaid,
       totalPending,
       percentPaid,
+      diffTotal,
       totalCount: bills.length,
       activeCount: activeBills.length,
       paidCount: paidBills.length,
@@ -193,7 +269,7 @@ const BillsManagement: React.FC<BillsManagementProps> = ({
             </span>
           </div>
           <p className="text-sm text-slate-400 mt-0.5">
-            Acompanhe o vencimento de contas fixas, assinaturas e despesas mensais
+            Gerencie vencimentos, compare valor projetado vs real e registre pagamentos mensais
           </p>
         </div>
 
@@ -251,7 +327,7 @@ const BillsManagement: React.FC<BillsManagementProps> = ({
           </div>
         </div>
 
-        {/* Total Estimated */}
+        {/* Total Month (Effective Amount) */}
         <div className="bg-slate-900/60 border border-white/[0.06] rounded-2xl p-4 shadow-lg flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total do Mês</span>
@@ -261,9 +337,23 @@ const BillsManagement: React.FC<BillsManagementProps> = ({
           </div>
           <div className="mt-2">
             <div className="text-xl sm:text-2xl font-extrabold text-white tabular-nums">
-              {formatCurrency(stats.totalEstimated)}
+              {formatCurrency(stats.totalEffective)}
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">{stats.activeCount} contas ativas previstas</p>
+            <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-0.5 flex-wrap">
+              <span>Projetado: {formatCurrency(stats.totalEstimated)}</span>
+              {stats.diffTotal !== 0 && (
+                <span
+                  className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
+                    stats.diffTotal > 0
+                      ? 'bg-amber-500/15 text-amber-300'
+                      : 'bg-emerald-500/15 text-emerald-300'
+                  }`}
+                >
+                  {stats.diffTotal > 0 ? '+' : ''}
+                  {formatCurrency(stats.diffTotal)}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -505,13 +595,55 @@ const BillsManagement: React.FC<BillsManagementProps> = ({
 
                 {/* Right side: Amount and Actions */}
                 <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-4 flex-shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-white/[0.05]">
+                  {/* Amount Block: Projected vs Real */}
                   <div className="text-left sm:text-right">
-                    <p className="font-extrabold text-base sm:text-lg text-slate-100 tabular-nums">
-                      {formatCurrency(bill.estimatedAmount)}
-                    </p>
-                    <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
-                      Valor Estimado
-                    </span>
+                    <div className="flex items-center gap-1.5 sm:justify-end">
+                      <p className="font-extrabold text-base sm:text-lg text-slate-100 tabular-nums">
+                        {formatCurrency(bill.effectiveAmount)}
+                      </p>
+
+                      {/* Button to edit/set real amount */}
+                      <button
+                        onClick={() => handleOpenSetAmountModal(bill, bill.realAmount)}
+                        className="w-6 h-6 rounded-md bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-blue-400 flex items-center justify-center text-[10px] transition-colors border border-white/5"
+                        title={bill.hasRealAmount ? 'Alterar valor real da fatura deste mês' : 'Informar valor real da fatura deste mês'}
+                      >
+                        <i className="fa-solid fa-pencil"></i>
+                      </button>
+                    </div>
+
+                    {/* Labels and comparison badges */}
+                    {bill.hasRealAmount ? (
+                      <div className="flex items-center gap-1 sm:justify-end flex-wrap text-[10px]">
+                        <span className="text-blue-400 font-semibold">Valor Real</span>
+                        <span className="text-slate-600">•</span>
+                        <span className="text-slate-400">Projetado: {formatCurrency(bill.estimatedAmount)}</span>
+                        {bill.difference !== 0 && (
+                          <span
+                            className={`font-bold px-1 rounded ${
+                              bill.difference > 0
+                                ? 'text-amber-400 bg-amber-500/10'
+                                : 'text-emerald-400 bg-emerald-500/10'
+                            }`}
+                          >
+                            {bill.difference > 0 ? '+' : ''}
+                            {formatCurrency(bill.difference)}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1 sm:justify-end">
+                        <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
+                          Valor Projetado
+                        </span>
+                        <button
+                          onClick={() => handleOpenSetAmountModal(bill, null)}
+                          className="text-[10px] text-blue-400 hover:text-blue-300 underline font-medium transition-colors ml-1"
+                        >
+                          Ajustar mês
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -519,7 +651,7 @@ const BillsManagement: React.FC<BillsManagementProps> = ({
                     {onPayBill && (
                       bill.isPaid ? (
                         <button
-                          onClick={() => onPayBill(bill, bill.dueDate)}
+                          onClick={() => onPayBill(bill, bill.dueDate, bill.effectiveAmount)}
                           className="px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold border border-white/10 transition-colors flex items-center gap-1.5"
                           title="Registrar outro pagamento para esta conta"
                         >
@@ -528,7 +660,7 @@ const BillsManagement: React.FC<BillsManagementProps> = ({
                         </button>
                       ) : (
                         <button
-                          onClick={() => onPayBill(bill, bill.dueDate)}
+                          onClick={() => onPayBill(bill, bill.dueDate, bill.effectiveAmount)}
                           disabled={bill.status === 'inactive'}
                           className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-30 disabled:cursor-not-allowed text-white text-xs font-bold transition-all shadow-md shadow-emerald-600/20 active:scale-95 flex items-center gap-1.5"
                         >
@@ -553,13 +685,13 @@ const BillsManagement: React.FC<BillsManagementProps> = ({
                       </button>
                     )}
 
-                    {/* Edit */}
+                    {/* Edit Bill Baseline */}
                     <button
                       onClick={() => onEdit(bill)}
                       className="w-8 h-8 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white transition-all flex items-center justify-center text-xs border border-white/[0.06]"
-                      title="Editar conta"
+                      title="Editar cadastro da conta"
                     >
-                      <i className="fa-solid fa-pencil"></i>
+                      <i className="fa-solid fa-gear"></i>
                     </button>
 
                     {/* Delete */}
@@ -600,6 +732,126 @@ const BillsManagement: React.FC<BillsManagementProps> = ({
               <span>Adicionar Primeira Conta</span>
             </button>
           )}
+        </div>
+      )}
+
+      {/* Modal: Set Real Monthly Amount */}
+      {modalData && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-150">
+          <div
+            className="bg-slate-900 border border-white/10 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="px-6 py-5 border-b border-white/[0.08] flex items-center justify-between bg-slate-800/40">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-400 flex items-center justify-center text-base">
+                  <i className="fa-solid fa-receipt"></i>
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-white">Valor Real da Fatura</h2>
+                  <p className="text-xs text-slate-400">{modalData.bill.name} • {monthLabel}</p>
+                </div>
+              </div>
+              <button
+                onClick={handleCloseSetAmountModal}
+                className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors flex items-center justify-center text-sm border border-white/5"
+              >
+                <i className="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleSaveRealAmount} className="p-6 space-y-4">
+              {/* Baseline Comparison Card */}
+              <div className="bg-slate-800/50 border border-white/[0.06] rounded-2xl p-3.5 flex items-center justify-between text-xs">
+                <span className="text-slate-400">Valor Projetado Base:</span>
+                <span className="font-extrabold text-white tabular-nums">
+                  {formatCurrency(modalData.bill.estimatedAmount)}
+                </span>
+              </div>
+
+              {/* Real Amount Input */}
+              <div className="bg-slate-800/80 border border-white/10 rounded-2xl p-4 text-center">
+                <label
+                  htmlFor="realAmountInput"
+                  className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1"
+                >
+                  Valor da Fatura de {monthLabel}
+                </label>
+                <div className="flex items-center justify-center gap-2">
+                  <span className="text-2xl font-bold text-blue-400">R$</span>
+                  <input
+                    id="realAmountInput"
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={inputRealAmount}
+                    onChange={(e) => setInputRealAmount(e.target.value)}
+                    placeholder="0,00"
+                    className="bg-transparent text-3xl font-extrabold text-white text-center focus:outline-none w-44 tabular-nums placeholder-slate-600"
+                    required
+                    autoFocus
+                  />
+                </div>
+
+                {/* Live difference preview */}
+                {inputRealAmount && !isNaN(parseFloat(inputRealAmount.replace(',', '.'))) && (
+                  <div className="mt-2 text-xs font-semibold">
+                    {(() => {
+                      const val = parseFloat(inputRealAmount.replace(',', '.'));
+                      const diff = val - modalData.bill.estimatedAmount;
+                      if (diff === 0) return <span className="text-slate-400">Igual ao valor projetado</span>;
+                      if (diff > 0)
+                        return (
+                          <span className="text-amber-400">
+                            +{formatCurrency(diff)} (+{Math.round((diff / modalData.bill.estimatedAmount) * 100)}%) que o projetado
+                          </span>
+                        );
+                      return (
+                        <span className="text-emerald-400">
+                          -{formatCurrency(Math.abs(diff))} (-{Math.round((Math.abs(diff) / modalData.bill.estimatedAmount) * 100)}%) economia!
+                        </span>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-2 flex flex-col sm:flex-row items-center justify-end gap-2 border-t border-white/[0.08]">
+                {modalData.currentRealAmount !== null && (
+                  <button
+                    type="button"
+                    onClick={handleResetRealAmount}
+                    disabled={isSavingRealAmount}
+                    className="w-full sm:w-auto px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-400 rounded-xl text-xs font-semibold transition-colors border border-white/5 mr-auto"
+                    title="Remover valor personalizado e voltar ao projetado"
+                  >
+                    Redefinir ao Projetado
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleCloseSetAmountModal}
+                  disabled={isSavingRealAmount}
+                  className="w-full sm:w-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold transition-colors border border-white/5"
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={isSavingRealAmount}
+                  className="w-full sm:w-auto px-5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-blue-600/25 active:scale-95 flex items-center justify-center gap-1.5"
+                >
+                  <i className="fa-solid fa-check text-xs"></i>
+                  <span>{isSavingRealAmount ? 'Salvando...' : 'Salvar Valor Real'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

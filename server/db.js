@@ -128,9 +128,22 @@ export async function initDb() {
           bill_id TEXT NOT NULL,
           year INTEGER NOT NULL,
           month INTEGER NOT NULL,
+          amount REAL,
           created_at TEXT DEFAULT (datetime('now'))
         );
         CREATE INDEX IF NOT EXISTS idx_bill_payments_user ON bill_payments(user_id);
+
+        CREATE TABLE IF NOT EXISTS bill_monthly_amounts (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          bill_id TEXT NOT NULL,
+          year INTEGER NOT NULL,
+          month INTEGER NOT NULL,
+          amount REAL NOT NULL,
+          created_at TEXT DEFAULT (datetime('now')),
+          UNIQUE(user_id, bill_id, year, month)
+        );
+        CREATE INDEX IF NOT EXISTS idx_bill_monthly_amounts_user ON bill_monthly_amounts(user_id);
 
         CREATE TABLE IF NOT EXISTS budgets (
           id TEXT PRIMARY KEY,
@@ -181,6 +194,12 @@ export async function initDb() {
       // Migrations for existing databases
       try {
         await db.exec(`ALTER TABLE credit_cards ADD COLUMN theme TEXT DEFAULT 'black';`);
+      } catch (e) {
+        // column already exists, safe to ignore
+      }
+
+      try {
+        await db.exec(`ALTER TABLE bill_payments ADD COLUMN amount REAL;`);
       } catch (e) {
         // column already exists, safe to ignore
       }

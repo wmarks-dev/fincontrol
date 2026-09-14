@@ -7,6 +7,7 @@ import {
   CreditCard,
   Bill,
   BillPayment,
+  BillMonthlyAmount,
   Budget,
   FinancialGoal,
   GoalContribution,
@@ -22,6 +23,7 @@ export interface AllUserData {
   creditCards: CreditCard[];
   bills: Bill[];
   billPayments: BillPayment[];
+  billMonthlyAmounts: BillMonthlyAmount[];
   budgets: Budget[];
   financialGoals: FinancialGoal[];
   goalContributions: GoalContribution[];
@@ -153,6 +155,24 @@ export const api = {
   deleteBill: (userId: string, id: string) =>
     request<{ success: boolean }>(`/api/bills/${id}`, userId, {
       method: 'DELETE',
+    }),
+
+  saveBillMonthlyAmount: (
+    userId: string,
+    data: { billId: string; year: number; month: number; amount: number }
+  ) =>
+    request<{ success: boolean; id: string }>('/api/bill-monthly-amounts', userId, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  deleteBillMonthlyAmount: (
+    userId: string,
+    data: { billId: string; year: number; month: number }
+  ) =>
+    request<{ success: boolean }>('/api/bill-monthly-amounts', userId, {
+      method: 'DELETE',
+      body: JSON.stringify(data),
     }),
 
   // Budgets

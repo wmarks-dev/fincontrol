@@ -9,6 +9,7 @@ import {
     LoanPayment,
     Bill,
     BillPayment,
+    BillMonthlyAmount,
     Budget,
     FinancialGoal,
     GoalContribution,
@@ -18,8 +19,8 @@ import { CATEGORIES } from '../constants';
 import { parseISODateAsUTC } from '../utils/dateUtils';
 import { api } from '../services/api';
 
-interface DataContextType {
-    // Data Arrays
+export interface DataContextType {
+    // Read-only State
     transactions: Transaction[];
     recurringTransactions: RecurringTransaction[];
     savingsTransactions: SavingsTransaction[];
@@ -28,6 +29,7 @@ interface DataContextType {
     creditCards: CreditCard[];
     bills: Bill[];
     billPayments: BillPayment[];
+    billMonthlyAmounts: BillMonthlyAmount[];
     budgets: Budget[];
     financialGoals: FinancialGoal[];
     goalContributions: GoalContribution[];
@@ -49,6 +51,8 @@ interface DataContextType {
     addBill: (billData: Omit<Bill, 'id' | 'status'>) => Promise<void>;
     updateBill: (updatedBill: Bill) => Promise<void>;
     deleteBill: (billId: string) => Promise<void>;
+    setBillMonthlyAmount: (billId: string, year: number, month: number, amount: number) => Promise<void>;
+    removeBillMonthlyAmount: (billId: string, year: number, month: number) => Promise<void>;
     addBudget: (budgetData: Omit<Budget, 'id'>) => Promise<void>;
     addMultipleBudgets: (newBudgetsData: Omit<Budget, 'id'>[]) => Promise<void>;
     updateBudget: (updatedBudget: Budget) => Promise<void>;
@@ -79,6 +83,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [creditCards, setCreditCards] = useState<CreditCard[]>([]);
     const [bills, setBills] = useState<Bill[]>([]);
     const [billPayments, setBillPayments] = useState<BillPayment[]>([]);
+    const [billMonthlyAmounts, setBillMonthlyAmounts] = useState<BillMonthlyAmount[]>([]);
     const [budgets, setBudgets] = useState<Budget[]>([]);
     const [financialGoals, setFinancialGoals] = useState<FinancialGoal[]>([]);
     const [goalContributions, setGoalContributions] = useState<GoalContribution[]>([]);
@@ -118,6 +123,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setCreditCards(data.creditCards);
             setBills(data.bills);
             setBillPayments(data.billPayments);
+            setBillMonthlyAmounts(data.billMonthlyAmounts || []);
             setBudgets(data.budgets);
             setFinancialGoals(data.financialGoals);
             setGoalContributions(data.goalContributions);
@@ -273,6 +279,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         await refreshData();
     };
 
+    const setBillMonthlyAmount = async (billId: string, year: number, month: number, amount: number) => {
+        if (!userId) return;
+        await api.saveBillMonthlyAmount(userId, { billId, year, month, amount });
+        await refreshData();
+    };
+
+    const removeBillMonthlyAmount = async (billId: string, year: number, month: number) => {
+        if (!userId) return;
+        await api.deleteBillMonthlyAmount(userId, { billId, year, month });
+        await refreshData();
+    };
+
     const addBudget = async (data: Omit<Budget, 'id'>) => {
         if (!userId) return;
         await api.addBudgets(userId, [data]);
@@ -342,6 +360,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         creditCards,
         bills,
         billPayments,
+        billMonthlyAmounts,
         budgets,
         financialGoals,
         goalContributions,
@@ -361,6 +380,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         addBill,
         updateBill,
         deleteBill,
+        setBillMonthlyAmount,
+        removeBillMonthlyAmount,
         addBudget,
         addMultipleBudgets,
         updateBudget,

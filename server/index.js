@@ -38,6 +38,7 @@ app.get('/api/data', async (req, res) => {
       loanPaymentsRows,
       billsRows,
       billPaymentsRows,
+      billMonthlyAmountsRows,
       budgetsRows,
       goalsRows,
       contributionsRows,
@@ -51,6 +52,7 @@ app.get('/api/data', async (req, res) => {
       db.all('SELECT * FROM loan_payments WHERE user_id = ? ORDER BY date DESC', userId),
       db.all('SELECT * FROM bills WHERE user_id = ? ORDER BY due_day ASC', userId),
       db.all('SELECT * FROM bill_payments WHERE user_id = ?', userId),
+      db.all('SELECT * FROM bill_monthly_amounts WHERE user_id = ?', userId),
       db.all('SELECT * FROM budgets WHERE user_id = ?', userId),
       db.all('SELECT * FROM financial_goals WHERE user_id = ?', userId),
       db.all('SELECT * FROM goal_contributions WHERE user_id = ? ORDER BY date DESC', userId),
@@ -126,6 +128,14 @@ app.get('/api/data', async (req, res) => {
         billId: r.bill_id,
         year: Number(r.year),
         month: Number(r.month),
+        amount: r.amount !== null && r.amount !== undefined ? Number(r.amount) : undefined,
+      })),
+      billMonthlyAmounts: billMonthlyAmountsRows.map(r => ({
+        id: r.id,
+        billId: r.bill_id,
+        year: Number(r.year),
+        month: Number(r.month),
+        amount: Number(r.amount),
       })),
       budgets: budgetsRows.map(r => ({
         id: r.id,
@@ -207,14 +217,31 @@ app.post('/api/transactions', async (req, res) => {
 
       if (pendingBillPayment) {
         const paymentId = pendingBillPayment.id || randomUUID();
+        const txAmount = newTransactionsData[0]?.amount;
         await db.run(
-          'INSERT INTO bill_payments (id, user_id, bill_id, year, month) VALUES (?, ?, ?, ?, ?)',
+          'INSERT INTO bill_payments (id, user_id, bill_id, year, month, amount) VALUES (?, ?, ?, ?, ?, ?)',
           paymentId,
           userId,
           pendingBillPayment.billId,
           pendingBillPayment.year,
-          pendingBillPayment.month
+          pendingBillPayment.month,
+          txAmount !== undefined ? txAmount : null
         );
+
+        if (txAmount !== undefined && txAmount !== null) {
+          const bmaId = `${pendingBillPayment.billId}_${pendingBillPayment.year}_${pendingBillPayment.month}`;
+          await db.run(
+            `INSERT INTO bill_monthly_amounts (id, user_id, bill_id, year, month, amount)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(user_id, bill_id, year, month) DO UPDATE SET amount = excluded.amount`,
+            bmaId,
+            userId,
+            pendingBillPayment.billId,
+            pendingBillPayment.year,
+            pendingBillPayment.month,
+            Number(txAmount)
+          );
+        }
       }
 
       await db.run('COMMIT');
@@ -665,9 +692,61 @@ app.delete('/api/bills/:id', async (req, res) => {
     const { id } = req.params;
 
     await db.run('DELETE FROM bills WHERE id = ? AND user_id = ?', id, userId);
+    await db.run('DELETE FROM bill_payments WHERE bill_id = ? AND user_id = ?', id, userId);
+    await db.run('DELETE FROM bill_monthly_amounts WHERE bill_id = ? AND user_id = ?', id, userId);
     res.json({ success: true });
   } catch (error) {
     console.error('Erro em DELETE /api/bills/:id:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ----------------------------------------------------
+// Bill Monthly Amounts (Real monthly invoice values)
+// ----------------------------------------------------
+app.post('/api/bill-monthly-amounts', async (req, res) => {
+  try {
+    const db = await initDb();
+    const userId = req.userId;
+    const { billId, year, month, amount } = req.body;
+    const id = `${billId}_${year}_${month}`;
+
+    await db.run(
+      `INSERT INTO bill_monthly_amounts (id, user_id, bill_id, year, month, amount)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, bill_id, year, month) DO UPDATE SET amount = excluded.amount`,
+      id,
+      userId,
+      billId,
+      Number(year),
+      Number(month),
+      Number(amount)
+    );
+
+    res.json({ success: true, id });
+  } catch (error) {
+    console.error('Erro em POST /api/bill-monthly-amounts:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/bill-monthly-amounts', async (req, res) => {
+  try {
+    const db = await initDb();
+    const userId = req.userId;
+    const { billId, year, month } = req.body;
+
+    await db.run(
+      'DELETE FROM bill_monthly_amounts WHERE user_id = ? AND bill_id = ? AND year = ? AND month = ?',
+      userId,
+      billId,
+      Number(year),
+      Number(month)
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Erro em DELETE /api/bill-monthly-amounts:', error);
     res.status(500).json({ error: error.message });
   }
 });
