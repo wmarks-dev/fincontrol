@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { CreditCard, Transaction, TransactionType, Category } from '../types';
-import { getMostRecentlyClosedBillInfo, BillInfo, parseISODateAsUTC } from '../utils/dateUtils';
+import { getCurrentOpenBillInfo, getMostRecentlyClosedBillInfo, BillInfo, parseISODateAsUTC } from '../utils/dateUtils';
 import BillHistoryModal from './BillHistoryModal';
 
 const formatCurrency = (value: number) => {
@@ -114,8 +114,15 @@ interface CardBillViewProps {
 }
 
 const CardBillView: React.FC<CardBillViewProps> = ({ card, transactions, onEdit, onDelete, onViewHistory, allCategories }) => {
-    // This view should show the bill that is currently pending payment (the one most recently closed).
-    const billInfo: BillInfo = useMemo(() => getMostRecentlyClosedBillInfo(card, new Date()), [card]);
+    // Shows the current open bill by default, with option to view the recently closed bill
+    const [billType, setBillType] = useState<'current' | 'closed'>('current');
+
+    const billInfo: BillInfo = useMemo(() => {
+        const today = new Date();
+        return billType === 'current'
+            ? getCurrentOpenBillInfo(card, today)
+            : getMostRecentlyClosedBillInfo(card, today);
+    }, [card, billType]);
 
     const billTransactions = useMemo(() => {
         return transactions.filter(t => {
@@ -135,13 +142,13 @@ const CardBillView: React.FC<CardBillViewProps> = ({ card, transactions, onEdit,
 
     return (
         <div className="bg-gray-800 p-6 rounded-xl shadow-lg flex flex-col h-full">
-            <div className="flex justify-between items-start mb-4">
+            <div className="flex justify-between items-start mb-3">
                 <div>
                     <h3 className="text-xl font-bold text-white">{card.name}</h3>
                     <p className="text-sm text-gray-400">Limite: {formatCurrency(card.limit)}</p>
                 </div>
                  <div className="text-right">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-end gap-3">
                         <button onClick={() => onEdit(card)} className="text-gray-400 hover:text-white transition-colors p-1" aria-label={`Editar cartão ${card.name}`}>
                             <i className="fa-solid fa-pencil"></i>
                         </button>
@@ -149,13 +156,48 @@ const CardBillView: React.FC<CardBillViewProps> = ({ card, transactions, onEdit,
                             <i className="fa-solid fa-trash"></i>
                         </button>
                     </div>
-                    <p className="text-xs text-gray-400 mt-2">Fatura Atual</p>
+                    <p className="text-xs text-gray-400 mt-2">{billType === 'current' ? 'Fatura Atual (Aberta)' : 'Fatura Fechada (Anterior)'}</p>
                     <p className="text-2xl font-bold text-orange-400">{formatCurrency(billTotal)}</p>
                 </div>
             </div>
-             <div className="text-sm text-gray-400 flex justify-between border-b border-gray-700 pb-2 mb-4">
-                <span>Fecha em: {billInfo.endDate.toLocaleDateString('pt-BR', { timeZone: 'UTC' })}</span>
-                <span>Vence em: {billInfo.dueDate.toLocaleDateString('pt-BR', { timeZone: 'UTC' })}</span>
+
+            {/* Bill Type Selector (Tabs) */}
+            <div className="flex bg-gray-900/60 p-1 rounded-lg mb-3">
+                <button
+                    type="button"
+                    onClick={() => setBillType('current')}
+                    className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded-md transition-all flex items-center justify-center gap-1.5 ${
+                        billType === 'current'
+                            ? 'bg-blue-600 text-white shadow'
+                            : 'text-gray-400 hover:text-white'
+                    }`}
+                >
+                    <i className="fa-solid fa-folder-open text-xs"></i>
+                    <span>Fatura Atual (Aberta)</span>
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setBillType('closed')}
+                    className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded-md transition-all flex items-center justify-center gap-1.5 ${
+                        billType === 'closed'
+                            ? 'bg-gray-700 text-white shadow'
+                            : 'text-gray-400 hover:text-white'
+                    }`}
+                >
+                    <i className="fa-solid fa-lock text-xs"></i>
+                    <span>Fatura Fechada</span>
+                </button>
+            </div>
+
+            <div className="text-sm text-gray-400 flex justify-between border-b border-gray-700 pb-2 mb-4">
+                <span>
+                    {billType === 'current' ? 'Fecha em: ' : 'Fechou em: '}
+                    <span className="text-gray-200 font-medium">{billInfo.endDate.toLocaleDateString('pt-BR', { timeZone: 'UTC' })}</span>
+                </span>
+                <span>
+                    {billType === 'current' ? 'Vence em: ' : 'Venceu em: '}
+                    <span className="text-gray-200 font-medium">{billInfo.dueDate.toLocaleDateString('pt-BR', { timeZone: 'UTC' })}</span>
+                </span>
             </div>
 
             <div className="space-y-3 flex-1 overflow-y-auto pr-2 custom-scrollbar" style={{maxHeight: '20rem'}}>
