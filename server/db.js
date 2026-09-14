@@ -69,6 +69,7 @@ export async function initDb() {
           closing_day INTEGER NOT NULL,
           due_day INTEGER NOT NULL,
           limit_amount REAL NOT NULL,
+          theme TEXT DEFAULT 'black',
           created_at TEXT DEFAULT (datetime('now'))
         );
         CREATE INDEX IF NOT EXISTS idx_cards_user ON credit_cards(user_id);
@@ -176,6 +177,13 @@ export async function initDb() {
         );
         CREATE INDEX IF NOT EXISTS idx_categories_user ON custom_categories(user_id);
       `);
+
+      // Migrations for existing databases
+      try {
+        await db.exec(`ALTER TABLE credit_cards ADD COLUMN theme TEXT DEFAULT 'black';`);
+      } catch (e) {
+        // column already exists, safe to ignore
+      }
 
       return db;
     })();

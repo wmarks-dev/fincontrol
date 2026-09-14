@@ -88,6 +88,7 @@ app.get('/api/data', async (req, res) => {
         closingDay: Number(r.closing_day),
         dueDay: Number(r.due_day),
         limit: Number(r.limit_amount),
+        theme: r.theme || 'black',
       })),
       savingsTransactions: savingsRows.map(r => ({
         id: r.id,
@@ -342,13 +343,14 @@ app.post('/api/cards', async (req, res) => {
     const id = data.id || randomUUID();
 
     await db.run(
-      'INSERT INTO credit_cards (id, user_id, name, closing_day, due_day, limit_amount) VALUES (?, ?, ?, ?, ?, ?)',
+      'INSERT INTO credit_cards (id, user_id, name, closing_day, due_day, limit_amount, theme) VALUES (?, ?, ?, ?, ?, ?, ?)',
       id,
       userId,
       data.name,
       data.closingDay,
       data.dueDay,
-      data.limit
+      data.limit,
+      data.theme || 'black'
     );
 
     res.json({ success: true, id });
@@ -366,11 +368,12 @@ app.put('/api/cards/:id', async (req, res) => {
     const data = req.body;
 
     await db.run(
-      'UPDATE credit_cards SET name = ?, closing_day = ?, due_day = ?, limit_amount = ? WHERE id = ? AND user_id = ?',
+      'UPDATE credit_cards SET name = ?, closing_day = ?, due_day = ?, limit_amount = ?, theme = ? WHERE id = ? AND user_id = ?',
       data.name,
       data.closingDay,
       data.dueDay,
       data.limit,
+      data.theme || 'black',
       id,
       userId
     );

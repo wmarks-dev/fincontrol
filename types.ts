@@ -32,10 +32,11 @@ export interface Transaction {
 
 export interface CreditCard {
   id: string;
-  name:string;
+  name: string;
   closingDay: number; // Day of the month
   dueDay: number; // Day of the month
   limit: number;
+  theme?: 'black' | 'purple' | 'emerald' | 'blue' | 'gold' | 'rose' | string;
 }
 
 export interface RecurringTransaction {
