@@ -13,13 +13,20 @@ interface ReportsProps {
 }
 
 
-const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#6366F1', '#14B8A6', '#F97316', '#D946EF'];
+const COLORS = ['#6366F1', '#10B981', '#38BDF8', '#F59E0B', '#EC4899', '#8B5CF6', '#14B8A6', '#F43F5E', '#A855F7', '#06B6D4'];
 
 const formatCurrency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-const Card: React.FC<{title: string, children: React.ReactNode, className?: string}> = ({ title, children, className }) => (
-    <div className={`bg-gray-800 p-6 rounded-xl shadow-lg flex flex-col ${className}`}>
-        <h2 className="text-lg font-semibold text-gray-300 mb-4 flex-shrink-0">{title}</h2>
+const Card: React.FC<{title: string, icon?: string, children: React.ReactNode, className?: string}> = ({ title, icon, children, className }) => (
+    <div className={`glass-card p-6 rounded-2xl border border-white/[0.07] flex flex-col ${className || ''}`}>
+        <h2 className="text-base font-bold text-slate-200 mb-5 flex items-center gap-2.5 flex-shrink-0">
+            {icon && (
+              <span className="w-8 h-8 rounded-lg bg-blue-500/15 border border-blue-500/20 text-blue-400 flex items-center justify-center text-xs">
+                <i className={`fa-solid ${icon}`}></i>
+              </span>
+            )}
+            {title}
+        </h2>
         {children}
     </div>
 );
@@ -27,12 +34,18 @@ const Card: React.FC<{title: string, children: React.ReactNode, className?: stri
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
     return (
-      <div className="p-2 bg-gray-700 border border-gray-600 rounded-md shadow-lg text-sm">
-        <p className="label text-white font-bold">{`${label}`}</p>
+      <div className="p-3 bg-slate-900/90 backdrop-blur-md border border-white/10 rounded-xl shadow-2xl text-xs space-y-1">
+        {label && <p className="text-slate-300 font-bold border-b border-white/10 pb-1 mb-1">{`${label}`}</p>}
         {payload.map((pld: any, index: number) => (
-          <p key={index} style={{ color: pld.color }}>
-            {`${pld.name}: ${formatCurrency(pld.value)}`}
-          </p>
+          <div key={index} className="flex items-center justify-between gap-4">
+            <span className="flex items-center gap-1.5 font-medium" style={{ color: pld.color }}>
+              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: pld.color }}></span>
+              {pld.name}:
+            </span>
+            <span className="font-bold text-white tabular-nums">
+              {formatCurrency(pld.value)}
+            </span>
+          </div>
         ))}
       </div>
     );
@@ -166,7 +179,11 @@ const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategor
   const PeriodButton: React.FC<{p: Period, label: string}> = ({p, label}) => (
     <button
       onClick={() => setPeriod(p)}
-      className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${period === p ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+      className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+        period === p 
+          ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/25' 
+          : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+      }`}
     >
       {label}
     </button>
@@ -180,9 +197,12 @@ const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategor
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <h1 className="text-3xl font-bold text-white">Relatórios Financeiros</h1>
-          <div className="flex items-center gap-2 bg-gray-800 p-1 rounded-lg">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-2 border-b border-white/[0.06]">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Relatórios Financeiros</h1>
+            <p className="text-sm text-slate-400 mt-0.5">Análises gráficas e tendências de gastos</p>
+          </div>
+          <div className="flex items-center gap-1.5 bg-slate-900/70 p-1 rounded-xl border border-white/[0.08]">
             <PeriodButton p="30d" label="30 dias" />
             <PeriodButton p="90d" label="90 dias" />
             <PeriodButton p="365d" label="Último Ano" />
@@ -190,19 +210,20 @@ const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategor
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <Card title="Despesas por Categoria" className="h-full">
+        <Card title="Despesas por Categoria" icon="fa-chart-pie" className="h-full">
           {expenseByCategory.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-grow">
-              <div className="h-64 md:h-full">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-grow items-center">
+              <div className="h-64 md:h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
                       data={expenseByCategory}
                       cx="50%"
                       cy="50%"
+                      innerRadius="58%"
+                      outerRadius="86%"
+                      paddingAngle={3}
                       labelLine={false}
-                      outerRadius="80%"
-                      fill="#8884d8"
                       dataKey="value"
                       stroke="none"
                       onClick={handlePieClick}
@@ -216,16 +237,20 @@ const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategor
                   </PieChart>
                 </ResponsiveContainer>
               </div>
-              <div className="space-y-2 overflow-y-auto max-h-64 md:max-h-full custom-scrollbar pr-2">
+              <div className="space-y-1.5 overflow-y-auto max-h-64 md:max-h-72 custom-scrollbar pr-2">
                 {expenseByCategory.map((entry, index) => (
-                   <div key={index} className="flex items-center justify-between text-sm">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full" style={{backgroundColor: COLORS[index % COLORS.length]}}></div>
-                        <span>{entry.name}</span>
+                   <div 
+                     key={index} 
+                     className="flex items-center justify-between text-xs sm:text-sm p-1.5 rounded-lg hover:bg-white/[0.04] transition-colors cursor-pointer"
+                     onClick={() => handlePieClick(entry)}
+                   >
+                      <div className="flex items-center gap-2.5 truncate">
+                        <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{backgroundColor: COLORS[index % COLORS.length]}}></div>
+                        <span className="text-slate-300 truncate font-medium">{entry.name}</span>
                       </div>
-                      <span className="font-semibold text-gray-300">
+                      <span className="font-bold text-slate-200 tabular-nums flex-shrink-0 ml-2">
                         {formatCurrency(entry.value)}
-                        <span className="ml-2 text-xs text-gray-500">
+                        <span className="ml-1.5 text-[11px] text-slate-500 font-normal">
                            ({totalExpenses > 0 ? ((entry.value / totalExpenses) * 100).toFixed(1) : 0}%)
                         </span>
                       </span>
@@ -234,47 +259,51 @@ const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategor
               </div>
             </div>
           ) : (
-            <div className="flex items-center justify-center flex-col h-full text-gray-500 flex-grow">
-                <i className="fa-solid fa-chart-pie text-5xl mb-4"></i>
-                <p>Nenhuma despesa no período.</p>
+            <div className="flex items-center justify-center flex-col h-64 text-slate-500 flex-grow">
+                <div className="w-12 h-12 rounded-2xl bg-slate-800/80 flex items-center justify-center text-slate-600 mb-3">
+                  <i className="fa-solid fa-chart-pie text-xl"></i>
+                </div>
+                <p className="text-slate-400 text-sm font-medium">Nenhuma despesa no período.</p>
             </div>
           )}
         </Card>
 
-        <Card title="Evolução Financeira Mensal" className="h-full">
+        <Card title="Evolução Financeira Mensal" icon="fa-chart-line" className="h-full">
             {monthlyTrendData.length > 0 ? (
                 <div className="flex-grow">
-                    <ResponsiveContainer width="100%" height="100%" minHeight={300}>
-                        <LineChart data={monthlyTrendData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#4A5568" />
-                            <XAxis dataKey="name" stroke="#A0AEC0" tick={{fontSize: 12}} />
-                            <YAxis stroke="#A0AEC0" tick={{fontSize: 12}} tickFormatter={(value: number) => formatCurrency(value)} />
+                    <ResponsiveContainer width="100%" height={300}>
+                        <LineChart data={monthlyTrendData} margin={{ top: 10, right: 20, left: -10, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
+                            <XAxis dataKey="name" stroke="#64748B" tick={{fontSize: 12, fill: '#94A3B8'}} />
+                            <YAxis stroke="#64748B" tick={{fontSize: 12, fill: '#94A3B8'}} tickFormatter={(value: number) => formatCurrency(value)} />
                             <Tooltip content={<CustomTooltip />} />
-                            <Legend wrapperStyle={{fontSize: "14px"}} />
-                            <Line type="monotone" dataKey="Receitas" stroke="#10B981" strokeWidth={2} activeDot={{ r: 8 }} />
-                            <Line type="monotone" dataKey="Despesas" stroke="#EF4444" strokeWidth={2} activeDot={{ r: 8 }} />
+                            <Legend wrapperStyle={{fontSize: "13px", paddingTop: "8px"}} />
+                            <Line type="monotone" dataKey="Receitas" stroke="#10B981" strokeWidth={2.5} dot={{ r: 4, fill: '#10B981' }} activeDot={{ r: 7 }} />
+                            <Line type="monotone" dataKey="Despesas" stroke="#F43F5E" strokeWidth={2.5} dot={{ r: 4, fill: '#F43F5E' }} activeDot={{ r: 7 }} />
                         </LineChart>
                     </ResponsiveContainer>
                 </div>
             ) : (
-                <div className="flex items-center justify-center flex-col h-full text-gray-500 flex-grow">
-                    <i className="fa-solid fa-chart-line text-5xl mb-4"></i>
-                    <p>Nenhum dado para exibir no período.</p>
+                <div className="flex items-center justify-center flex-col h-64 text-slate-500 flex-grow">
+                    <div className="w-12 h-12 rounded-2xl bg-slate-800/80 flex items-center justify-center text-slate-600 mb-3">
+                      <i className="fa-solid fa-chart-line text-xl"></i>
+                    </div>
+                    <p className="text-slate-400 text-sm font-medium">Nenhum dado para exibir no período.</p>
                 </div>
             )}
         </Card>
       </div>
       
-      <Card title="Evolução do Patrimônio Líquido">
+      <Card title="Evolução do Patrimônio Líquido" icon="fa-arrow-trend-up">
         {netWorthEvolutionData.length > 1 ? (
           <div className="flex-grow">
             <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={netWorthEvolutionData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#4A5568" />
-                <XAxis dataKey="date" stroke="#A0AEC0" tick={{ fontSize: 12 }} />
+              <LineChart data={netWorthEvolutionData} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
+                <XAxis dataKey="date" stroke="#64748B" tick={{ fontSize: 12, fill: '#94A3B8' }} />
                 <YAxis
-                  stroke="#A0AEC0"
-                  tick={{ fontSize: 12 }}
+                  stroke="#64748B"
+                  tick={{ fontSize: 12, fill: '#94A3B8' }}
                   tickFormatter={(value: number) => {
                     if (Math.abs(value) >= 1000) return `${(value / 1000).toFixed(0)}k`;
                     return formatCurrency(value);
@@ -286,19 +315,21 @@ const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategor
                 <Line
                   type="monotone"
                   dataKey="Patrimônio"
-                  stroke="#3B82F6"
-                  strokeWidth={2}
+                  stroke="#6366F1"
+                  strokeWidth={2.5}
                   dot={false}
-                  activeDot={{ r: 6 }}
+                  activeDot={{ r: 6, fill: '#818CF8' }}
                 />
               </LineChart>
             </ResponsiveContainer>
           </div>
         ) : (
-          <div className="flex items-center justify-center flex-col text-gray-500" style={{height: '300px'}}>
-            <i className="fa-solid fa-chart-line text-5xl mb-4"></i>
-            <p>Dados insuficientes para exibir a evolução.</p>
-            <p className="text-sm">Tente selecionar um período maior ou adicione mais transações.</p>
+          <div className="flex items-center justify-center flex-col text-slate-500 h-64">
+            <div className="w-12 h-12 rounded-2xl bg-slate-800/80 flex items-center justify-center text-slate-600 mb-3">
+                      <i className="fa-solid fa-chart-line text-xl"></i>
+            </div>
+            <p className="text-slate-400 text-sm font-medium">Dados insuficientes para exibir a evolução.</p>
+            <p className="text-xs text-slate-500 mt-0.5">Tente selecionar um período maior ou adicione mais transações.</p>
           </div>
         )}
       </Card>

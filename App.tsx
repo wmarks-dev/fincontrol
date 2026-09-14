@@ -303,39 +303,51 @@ const AppContent: React.FC = () => {
     { view: 'settings', label: 'Ajustes', icon: 'fa-gear' },
   ] as const;
 
-  const NavButton: React.FC<{view: View, label: string, icon: string, onClick: (view: View) => void}> = ({ view, label, icon, onClick }) => (
-    <button
-      onClick={() => onClick(view)}
-      className={`flex flex-col sm:flex-row items-center justify-center sm:justify-start gap-2 px-4 py-3 rounded-lg transition-colors duration-200 w-full text-left ${
-        activeView === view ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-white'
-      }`}
-    >
-      <i className={`fa-solid ${icon} w-6 text-center`}></i>
-      <span className="text-xs sm:text-base font-medium">{label}</span>
-    </button>
-  );
+  const NavButton: React.FC<{view: View, label: string, icon: string, onClick: (view: View) => void}> = ({ view, label, icon, onClick }) => {
+    const isActive = activeView === view;
+    return (
+      <button
+        onClick={() => onClick(view)}
+        className={`group flex flex-col sm:flex-row items-center justify-center sm:justify-start gap-3 px-3.5 py-2.5 rounded-xl transition-all duration-200 w-full text-left font-medium text-sm ${
+          isActive
+            ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/25 font-semibold'
+            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+        }`}
+      >
+        <div className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+          isActive ? 'bg-white/20 text-white' : 'text-slate-400 group-hover:text-blue-400 group-hover:bg-blue-500/10'
+        }`}>
+          <i className={`fa-solid ${icon} text-sm`}></i>
+        </div>
+        <span className="text-xs sm:text-sm">{label}</span>
+      </button>
+    );
+  };
 
   return (
-    <div className="flex flex-col md:flex-row min-h-screen bg-gray-900 text-gray-100">
-      <nav className="md:w-64 bg-gray-800 p-4 flex md:flex-col justify-between items-center md:items-stretch md:justify-start gap-4 md:gap-2 border-b-2 md:border-b-0 md:border-r-2 border-gray-700">
+    <div className="flex flex-col md:flex-row min-h-screen text-slate-100">
+      <nav className="md:w-64 bg-slate-900/80 backdrop-blur-xl p-4 flex md:flex-col justify-between items-center md:items-stretch md:justify-start gap-4 md:gap-2 border-b md:border-b-0 md:border-r border-white/[0.08]">
         
         <div className="hidden md:flex flex-col w-full h-full">
-          <div className="flex flex-col items-center gap-3 mb-4 flex-shrink-0">
-            <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center text-white text-2xl font-bold">
+          <div className="flex flex-col items-center gap-2.5 mb-6 flex-shrink-0 bg-slate-800/40 p-4 rounded-2xl border border-white/[0.06] shadow-sm">
+            <div className="w-14 h-14 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center text-white text-xl font-bold shadow-lg shadow-blue-500/25 border border-white/20">
                 {currentUser?.displayName?.charAt(0).toUpperCase()}
             </div>
             <div className="text-center">
-              <h1 className="text-lg font-bold text-white leading-tight">Olá, {currentUser?.displayName}</h1>
-              <p className="text-xs text-gray-400">Bem-vindo(a) de volta</p>
+              <h1 className="text-base font-bold text-white leading-tight">Olá, {currentUser?.displayName}</h1>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 mt-1.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>SQLite Local</span>
+              </div>
             </div>
           </div>
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-1.5">
             {[...mainNavItems, ...moreNavItems].map(item => <NavButton key={item.view} {...item} onClick={handleNavClick} />)}
           </div>
-          <div className="mt-auto pt-4 border-t border-gray-700/50">
-              <button onClick={logout} className="flex items-center gap-2 px-4 py-3 rounded-lg transition-colors duration-200 w-full text-left text-red-400 hover:bg-gray-700 hover:text-red-300">
-                  <i className="fa-solid fa-sign-out-alt w-6 text-center"></i>
-                  <span className="text-base font-medium">Sair</span>
+          <div className="mt-auto pt-4 border-t border-slate-700/50">
+              <button onClick={logout} className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-all duration-200 w-full text-left text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 text-sm font-medium">
+                  <i className="fa-solid fa-sign-out-alt w-5 text-center"></i>
+                  <span>Sair</span>
               </button>
           </div>
         </div>
@@ -344,14 +356,14 @@ const AppContent: React.FC = () => {
           <div className="flex flex-nowrap items-center gap-2">
             {mainNavItems.map(item => <NavButton key={item.view} {...item} onClick={handleNavClick} />)}
             <div className="relative" ref={mobileMenuRef}>
-              <button onClick={() => setIsMobileMenuOpen(prev => !prev)} className={`flex flex-col sm:flex-row items-center justify-center sm:justify-start gap-2 px-4 py-3 rounded-lg transition-colors duration-200 w-full text-left ${isMobileMenuOpen ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-white'}`}>
-                <i className="fa-solid fa-ellipsis-h w-6 text-center"></i>
-                <span className="text-xs sm:text-base font-medium">Mais</span>
+              <button onClick={() => setIsMobileMenuOpen(prev => !prev)} className={`flex flex-col sm:flex-row items-center justify-center sm:justify-start gap-2 px-3 py-2 rounded-xl transition-colors duration-200 w-full text-left ${isMobileMenuOpen ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
+                <i className="fa-solid fa-ellipsis-h w-5 text-center"></i>
+                <span className="text-xs sm:text-sm font-medium">Mais</span>
               </button>
               {isMobileMenuOpen && (
-                <div className="absolute bottom-full mb-2 left-0 sm:left-auto sm:right-0 bg-gray-800 border border-gray-700 rounded-lg shadow-xl py-2 z-20 min-w-[180px]">
+                <div className="absolute bottom-full mb-2 left-0 sm:left-auto sm:right-0 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl py-2 z-20 min-w-[190px]">
                   {moreNavItems.map(item => (
-                    <button key={item.view} onClick={() => handleNavClick(item.view)} className={`flex items-center gap-3 px-4 py-2 w-full text-left text-sm ${activeView === item.view ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-700'}`}>
+                    <button key={item.view} onClick={() => handleNavClick(item.view)} className={`flex items-center gap-3 px-4 py-2.5 w-full text-left text-sm ${activeView === item.view ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700/60'}`}>
                       <i className={`fa-solid ${item.icon} w-5 text-center`}></i>
                       <span>{item.label}</span>
                     </button>
@@ -365,11 +377,11 @@ const AppContent: React.FC = () => {
         <div className="md:hidden flex-shrink-0">
           <button
             onClick={logout}
-            className="flex flex-col items-center justify-center h-full w-16 px-2 py-1.5 rounded-lg text-red-400 hover:bg-gray-700 hover:text-red-300 transition-colors"
+            className="flex flex-col items-center justify-center h-full w-14 px-2 py-1.5 rounded-xl text-rose-400 hover:bg-rose-500/10 transition-colors"
             aria-label="Sair"
           >
-            <i className="fa-solid fa-sign-out-alt text-xl"></i>
-            <span className="text-xs mt-1 font-medium">Sair</span>
+            <i className="fa-solid fa-sign-out-alt text-lg"></i>
+            <span className="text-xs mt-0.5 font-medium">Sair</span>
           </button>
         </div>
       </nav>
@@ -380,10 +392,10 @@ const AppContent: React.FC = () => {
       
       <button
         onClick={() => { setEditingTransaction(null); setIsModalOpen(true); }}
-        className="fixed bottom-6 right-6 bg-blue-600 hover:bg-blue-700 text-white rounded-full w-14 h-14 flex items-center justify-center shadow-lg transition-transform transform hover:scale-110"
+        className="fixed bottom-6 right-6 bg-gradient-to-tr from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-2xl w-14 h-14 flex items-center justify-center shadow-xl shadow-blue-600/30 transition-all duration-300 hover:scale-105 active:scale-95"
         aria-label="Adicionar Transação"
       >
-        <i className="fa-solid fa-plus text-2xl"></i>
+        <i className="fa-solid fa-plus text-2xl transition-transform duration-300 group-hover:rotate-90"></i>
       </button>
 
       {isModalOpen && (
