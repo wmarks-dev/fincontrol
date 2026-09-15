@@ -95,6 +95,9 @@ export interface Bill {
   estimatedAmount: number;
   category: string;
   status: 'active' | 'inactive';
+  startYear?: number;
+  startMonth?: number; // 0-11
+  createdAt?: string;
 }
 
 export interface BillPayment {

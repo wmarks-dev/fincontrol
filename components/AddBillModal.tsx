@@ -8,9 +8,16 @@ interface AddBillModalProps {
   billToEdit: Bill | null;
   allCategories: Category[];
   onError: (title: string, message: string) => void;
+  initialYear?: number;
+  initialMonth?: number;
 }
 
 const QUICK_DUE_DAYS = [5, 10, 15, 20, 25];
+
+const MONTH_NAMES = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+];
 
 const AddBillModal: React.FC<AddBillModalProps> = ({
   onClose,
@@ -19,11 +26,19 @@ const AddBillModal: React.FC<AddBillModalProps> = ({
   billToEdit,
   allCategories,
   onError,
+  initialYear,
+  initialMonth,
 }) => {
+  const now = new Date();
+  const defaultYear = initialYear ?? now.getUTCFullYear();
+  const defaultMonth = initialMonth ?? now.getUTCMonth();
+
   const [name, setName] = useState('');
   const [dueDay, setDueDay] = useState('10');
   const [estimatedAmount, setEstimatedAmount] = useState('');
   const [category, setCategory] = useState('bills');
+  const [startYear, setStartYear] = useState<number>(defaultYear);
+  const [startMonth, setStartMonth] = useState<number>(defaultMonth);
 
   const isEditing = !!billToEdit;
 
@@ -33,8 +48,13 @@ const AddBillModal: React.FC<AddBillModalProps> = ({
       setDueDay(String(billToEdit.dueDay));
       setEstimatedAmount(String(billToEdit.estimatedAmount));
       setCategory(billToEdit.category);
+      if (billToEdit.startYear !== undefined) setStartYear(billToEdit.startYear);
+      if (billToEdit.startMonth !== undefined) setStartMonth(billToEdit.startMonth);
+    } else {
+      setStartYear(initialYear ?? now.getUTCFullYear());
+      setStartMonth(initialMonth ?? now.getUTCMonth());
     }
-  }, [isEditing, billToEdit]);
+  }, [isEditing, billToEdit, initialYear, initialMonth]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,7 +69,14 @@ const AddBillModal: React.FC<AddBillModalProps> = ({
       return;
     }
 
-    const billData = { name: name.trim(), dueDay: numDueDay, estimatedAmount: numAmount, category };
+    const billData = {
+      name: name.trim(),
+      dueDay: numDueDay,
+      estimatedAmount: numAmount,
+      category,
+      startYear,
+      startMonth,
+    };
 
     if (isEditing && billToEdit) {
       onUpdate({ ...billData, id: billToEdit.id, status: billToEdit.status });
@@ -201,6 +228,60 @@ const AddBillModal: React.FC<AddBillModalProps> = ({
               </select>
               <i className="fa-solid fa-chevron-down absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"></i>
             </div>
+          </div>
+
+          {/* Start Month and Year Selector */}
+          <div className="bg-slate-800/50 border border-white/[0.08] rounded-2xl p-4 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300">
+                Válida a Partir De
+              </label>
+              <span className="text-xs font-bold text-amber-400">
+                {MONTH_NAMES[startMonth]} de {startYear}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-0.5">
+              {/* Month Select */}
+              <div className="relative">
+                <select
+                  value={startMonth}
+                  onChange={(e) => setStartMonth(parseInt(e.target.value, 10))}
+                  className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white text-sm focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all appearance-none cursor-pointer"
+                >
+                  {MONTH_NAMES.map((mName, idx) => (
+                    <option key={idx} value={idx} className="bg-slate-900 text-white">
+                      {mName}
+                    </option>
+                  ))}
+                </select>
+                <i className="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"></i>
+              </div>
+
+              {/* Year Select */}
+              <div className="relative">
+                <select
+                  value={startYear}
+                  onChange={(e) => setStartYear(parseInt(e.target.value, 10))}
+                  className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white text-sm focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all appearance-none cursor-pointer"
+                >
+                  {[-1, 0, 1, 2, 3].map((offset) => {
+                    const y = now.getUTCFullYear() + offset;
+                    return (
+                      <option key={y} value={y} className="bg-slate-900 text-white">
+                        {y}
+                      </option>
+                    );
+                  })}
+                </select>
+                <i className="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"></i>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-400 leading-tight pt-1 flex items-center gap-1.5">
+              <i className="fa-solid fa-circle-info text-[10px] text-amber-400 flex-shrink-0"></i>
+              <span>Esta conta só existirá e gerará vencimentos a partir deste mês, não gerando pendências em meses anteriores.</span>
+            </p>
           </div>
 
           {/* Modal Actions */}

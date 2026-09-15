@@ -254,6 +254,21 @@ const Dashboard: React.FC<DashboardProps> = ({
 
     const currentYear = today.getUTCFullYear();
     const currentMonth = today.getUTCMonth();
+    const currentEpoch = currentYear * 12 + currentMonth;
+
+    const getBillStart = (bill: Bill): { year: number; month: number } => {
+      if (bill.startYear !== undefined && bill.startMonth !== undefined) {
+        return { year: bill.startYear, month: bill.startMonth };
+      }
+      if (bill.createdAt) {
+        const d = new Date(bill.createdAt);
+        if (!isNaN(d.getTime())) {
+          return { year: d.getUTCFullYear(), month: d.getUTCMonth() };
+        }
+      }
+      const n = new Date();
+      return { year: n.getUTCFullYear(), month: n.getUTCMonth() };
+    };
 
     const items: Array<{
       id: string;
@@ -270,74 +285,82 @@ const Dashboard: React.FC<DashboardProps> = ({
     const activeBills = bills.filter((b) => b.status === 'active');
 
     for (const bill of activeBills) {
-      // 1. Current Month check
-      const maxDaysCurrent = new Date(Date.UTC(currentYear, currentMonth + 1, 0)).getUTCDate();
-      const currentDueDate = new Date(
-        Date.UTC(currentYear, currentMonth, Math.min(bill.dueDay, maxDaysCurrent))
-      );
+      const start = getBillStart(bill);
+      const startEpoch = start.year * 12 + start.month;
 
+      // 1. Current Month check (only if bill already exists in current month)
       const isPaidCurrent = billPayments.some(
         (p) => p.billId === bill.id && p.year === currentYear && p.month === currentMonth
       );
 
-      const diffTimeCurrent = currentDueDate.getTime() - today.getTime();
-      const diffDaysCurrent = Math.round(diffTimeCurrent / (1000 * 60 * 60 * 24));
+      if (currentEpoch >= startEpoch) {
+        const maxDaysCurrent = new Date(Date.UTC(currentYear, currentMonth + 1, 0)).getUTCDate();
+        const currentDueDate = new Date(
+          Date.UTC(currentYear, currentMonth, Math.min(bill.dueDay, maxDaysCurrent))
+        );
 
-      const monthlyOverrideCurrent = (billMonthlyAmounts || []).find(
-        (m) => m.billId === bill.id && m.year === currentYear && m.month === currentMonth
-      );
-      const amountCurrent = monthlyOverrideCurrent ? monthlyOverrideCurrent.amount : bill.estimatedAmount;
+        const diffTimeCurrent = currentDueDate.getTime() - today.getTime();
+        const diffDaysCurrent = Math.round(diffTimeCurrent / (1000 * 60 * 60 * 24));
 
-      if (!isPaidCurrent) {
-        if (diffDaysCurrent < 0) {
-          // VENCIDA no mês atual!
-          items.push({
-            id: `${bill.id}_${currentYear}_${currentMonth}`,
-            bill,
-            name: bill.name,
-            dueDate: currentDueDate,
-            isPaid: false,
-            status: 'overdue',
-            diffDays: Math.abs(diffDaysCurrent),
-            amount: amountCurrent,
-            hasRealAmount: !!monthlyOverrideCurrent,
-          });
-        } else if (diffDaysCurrent === 0) {
-          // VENCE HOJE!
-          items.push({
-            id: `${bill.id}_${currentYear}_${currentMonth}`,
-            bill,
-            name: bill.name,
-            dueDate: currentDueDate,
-            isPaid: false,
-            status: 'due_today',
-            diffDays: 0,
-            amount: amountCurrent,
-            hasRealAmount: !!monthlyOverrideCurrent,
-          });
-        } else if (diffDaysCurrent <= 30) {
-          // A VENCER NOS PRÓXIMOS 30 DIAS!
-          items.push({
-            id: `${bill.id}_${currentYear}_${currentMonth}`,
-            bill,
-            name: bill.name,
-            dueDate: currentDueDate,
-            isPaid: false,
-            status: diffDaysCurrent <= 3 ? 'due_soon' : 'upcoming',
-            diffDays: diffDaysCurrent,
-            amount: amountCurrent,
-            hasRealAmount: !!monthlyOverrideCurrent,
-          });
+        const monthlyOverrideCurrent = (billMonthlyAmounts || []).find(
+          (m) => m.billId === bill.id && m.year === currentYear && m.month === currentMonth
+        );
+        const amountCurrent = monthlyOverrideCurrent ? monthlyOverrideCurrent.amount : bill.estimatedAmount;
+
+        if (!isPaidCurrent) {
+          if (diffDaysCurrent < 0) {
+            // VENCIDA no mês atual!
+            items.push({
+              id: `${bill.id}_${currentYear}_${currentMonth}`,
+              bill,
+              name: bill.name,
+              dueDate: currentDueDate,
+              isPaid: false,
+              status: 'overdue',
+              diffDays: Math.abs(diffDaysCurrent),
+              amount: amountCurrent,
+              hasRealAmount: !!monthlyOverrideCurrent,
+            });
+          } else if (diffDaysCurrent === 0) {
+            // VENCE HOJE!
+            items.push({
+              id: `${bill.id}_${currentYear}_${currentMonth}`,
+              bill,
+              name: bill.name,
+              dueDate: currentDueDate,
+              isPaid: false,
+              status: 'due_today',
+              diffDays: 0,
+              amount: amountCurrent,
+              hasRealAmount: !!monthlyOverrideCurrent,
+            });
+          } else if (diffDaysCurrent <= 30) {
+            // A VENCER NOS PRÓXIMOS 30 DIAS!
+            items.push({
+              id: `${bill.id}_${currentYear}_${currentMonth}`,
+              bill,
+              name: bill.name,
+              dueDate: currentDueDate,
+              isPaid: false,
+              status: diffDaysCurrent <= 3 ? 'due_soon' : 'upcoming',
+              diffDays: diffDaysCurrent,
+              amount: amountCurrent,
+              hasRealAmount: !!monthlyOverrideCurrent,
+            });
+          }
         }
-      } else {
-        // Já paga no mês atual! Calcular próximo vencimento no próximo mês
-        let nextYear = currentYear;
-        let nextMonth = currentMonth + 1;
-        if (nextMonth > 11) {
-          nextMonth = 0;
-          nextYear += 1;
-        }
+      }
 
+      // Next month check (if already paid this month OR if bill starts next month)
+      let nextYear = currentYear;
+      let nextMonth = currentMonth + 1;
+      if (nextMonth > 11) {
+        nextMonth = 0;
+        nextYear += 1;
+      }
+      const nextEpoch = nextYear * 12 + nextMonth;
+
+      if ((isPaidCurrent || currentEpoch < startEpoch) && nextEpoch >= startEpoch) {
         const maxDaysNext = new Date(Date.UTC(nextYear, nextMonth + 1, 0)).getUTCDate();
         const nextDueDate = new Date(Date.UTC(nextYear, nextMonth, Math.min(bill.dueDay, maxDaysNext)));
 
@@ -364,37 +387,41 @@ const Dashboard: React.FC<DashboardProps> = ({
         }
       }
 
-      // Também verifica se o mês anterior não foi pago (vencida com mais tempo de atraso)
+      // Verifica mês anterior se não foi pago - MAS SOMENTE SE A CONTA JÁ EXISTIA NO MÊS ANTERIOR!
       let prevYear = currentYear;
       let prevMonth = currentMonth - 1;
       if (prevMonth < 0) {
         prevMonth = 11;
         prevYear -= 1;
       }
-      const isPaidPrev = billPayments.some(
-        (p) => p.billId === bill.id && p.year === prevYear && p.month === prevMonth
-      );
-      if (!isPaidPrev) {
-        const maxDaysPrev = new Date(Date.UTC(prevYear, prevMonth + 1, 0)).getUTCDate();
-        const prevDueDate = new Date(Date.UTC(prevYear, prevMonth, Math.min(bill.dueDay, maxDaysPrev)));
-        const prevDiffTime = today.getTime() - prevDueDate.getTime();
-        const prevDiffDays = Math.max(1, Math.round(prevDiffTime / (1000 * 60 * 60 * 24)));
-        const monthlyOverridePrev = (billMonthlyAmounts || []).find(
-          (m) => m.billId === bill.id && m.year === prevYear && m.month === prevMonth
-        );
-        const amountPrev = monthlyOverridePrev ? monthlyOverridePrev.amount : bill.estimatedAmount;
+      const prevEpoch = prevYear * 12 + prevMonth;
 
-        items.push({
-          id: `${bill.id}_${prevYear}_${prevMonth}`,
-          bill,
-          name: bill.name,
-          dueDate: prevDueDate,
-          isPaid: false,
-          status: 'overdue',
-          diffDays: prevDiffDays,
-          amount: amountPrev,
-          hasRealAmount: !!monthlyOverridePrev,
-        });
+      if (prevEpoch >= startEpoch) {
+        const isPaidPrev = billPayments.some(
+          (p) => p.billId === bill.id && p.year === prevYear && p.month === prevMonth
+        );
+        if (!isPaidPrev) {
+          const maxDaysPrev = new Date(Date.UTC(prevYear, prevMonth + 1, 0)).getUTCDate();
+          const prevDueDate = new Date(Date.UTC(prevYear, prevMonth, Math.min(bill.dueDay, maxDaysPrev)));
+          const prevDiffTime = today.getTime() - prevDueDate.getTime();
+          const prevDiffDays = Math.max(1, Math.round(prevDiffTime / (1000 * 60 * 60 * 24)));
+          const monthlyOverridePrev = (billMonthlyAmounts || []).find(
+            (m) => m.billId === bill.id && m.year === prevYear && m.month === prevMonth
+          );
+          const amountPrev = monthlyOverridePrev ? monthlyOverridePrev.amount : bill.estimatedAmount;
+
+          items.push({
+            id: `${bill.id}_${prevYear}_${prevMonth}`,
+            bill,
+            name: bill.name,
+            dueDate: prevDueDate,
+            isPaid: false,
+            status: 'overdue',
+            diffDays: prevDiffDays,
+            amount: amountPrev,
+            hasRealAmount: !!monthlyOverridePrev,
+          });
+        }
       }
     }
 

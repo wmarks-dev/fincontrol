@@ -6,7 +6,7 @@ interface BillsManagementProps {
   billPayments?: BillPayment[];
   billMonthlyAmounts?: BillMonthlyAmount[];
   allCategories: Category[];
-  onAdd: () => void;
+  onAdd: (year?: number, month?: number) => void;
   onEdit: (bill: Bill) => void;
   onDelete: (billId: string) => void;
   onPayBill?: (bill: Bill, nextDueDate: Date, customAmount?: number) => void;
@@ -150,11 +150,34 @@ const BillsManagement: React.FC<BillsManagementProps> = ({
     }
   };
 
+  // Helper to determine from which year and month a bill is effective
+  const getBillStart = (bill: Bill): { year: number; month: number } => {
+    if (bill.startYear !== undefined && bill.startMonth !== undefined) {
+      return { year: bill.startYear, month: bill.startMonth };
+    }
+    if (bill.createdAt) {
+      const d = new Date(bill.createdAt);
+      if (!isNaN(d.getTime())) {
+        return { year: d.getUTCFullYear(), month: d.getUTCMonth() };
+      }
+    }
+    const n = new Date();
+    return { year: n.getUTCFullYear(), month: n.getUTCMonth() };
+  };
+
   // Compute status for all bills for the selected month
   const processedBills = useMemo(() => {
     const maxDays = new Date(Date.UTC(selectedYear, selectedMonth + 1, 0)).getUTCDate();
+    const selectedEpoch = selectedYear * 12 + selectedMonth;
 
-    return bills.map((bill) => {
+    // Filter bills: ONLY include bills that started on or before the selected month
+    const activePeriodBills = bills.filter((bill) => {
+      const start = getBillStart(bill);
+      const startEpoch = start.year * 12 + start.month;
+      return selectedEpoch >= startEpoch;
+    });
+
+    return activePeriodBills.map((bill) => {
       const effectiveDueDay = Math.min(bill.dueDay, maxDays);
       const dueDate = new Date(Date.UTC(selectedYear, selectedMonth, effectiveDueDay));
 
@@ -203,6 +226,7 @@ const BillsManagement: React.FC<BillsManagementProps> = ({
         hasRealAmount,
         effectiveAmount,
         difference,
+        startInfo: getBillStart(bill),
       };
     }).sort((a, b) => {
       if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
@@ -231,13 +255,13 @@ const BillsManagement: React.FC<BillsManagementProps> = ({
       totalPending,
       percentPaid,
       diffTotal,
-      totalCount: bills.length,
+      totalCount: processedBills.length,
       activeCount: activeBills.length,
       paidCount: paidBills.length,
       pendingCount: pendingBills.length,
       overdueCount: overdueBills.length,
     };
-  }, [processedBills, bills.length]);
+  }, [processedBills]);
 
   // Filtered Bills
   const filteredBills = useMemo(() => {
@@ -274,7 +298,7 @@ const BillsManagement: React.FC<BillsManagementProps> = ({
         </div>
 
         <button
-          onClick={onAdd}
+          onClick={() => onAdd(selectedYear, selectedMonth)}
           className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl transition-all duration-200 font-semibold text-sm shadow-lg shadow-blue-500/25 active:scale-95"
         >
           <i className="fa-solid fa-plus text-xs"></i>
@@ -585,10 +609,18 @@ const BillsManagement: React.FC<BillsManagementProps> = ({
                       )}
                     </div>
 
-                    <p className="text-xs text-slate-400 mt-1 flex items-center gap-2">
+                    <p className="text-xs text-slate-400 mt-1 flex items-center gap-2 flex-wrap">
                       <span className="text-slate-300 font-medium">{category?.name || 'Contas e Despesas'}</span>
                       <span className="text-slate-600">•</span>
-                      <span>Vencimento no mês: {bill.dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', timeZone: 'UTC' })}</span>
+                      <span>Vencimento: dia {bill.effectiveDueDay}</span>
+                      {bill.startYear !== undefined && bill.startMonth !== undefined && (
+                        <>
+                          <span className="text-slate-600">•</span>
+                          <span className="text-slate-400 text-[11px]">
+                            Válida desde {new Date(Date.UTC(bill.startYear, bill.startMonth, 1)).toLocaleDateString('pt-BR', { month: 'short', year: 'numeric', timeZone: 'UTC' })}
+                          </span>
+                        </>
+                      )}
                     </p>
                   </div>
                 </div>
@@ -714,22 +746,22 @@ const BillsManagement: React.FC<BillsManagementProps> = ({
             <i className="fa-solid fa-file-invoice-dollar"></i>
           </div>
           <h3 className="text-lg font-bold text-white mb-1">
-            {bills.length === 0
-              ? 'Nenhuma conta cadastrada'
+            {processedBills.length === 0
+              ? `Nenhuma conta ativa para ${monthLabel}`
               : 'Nenhuma conta encontrada com os filtros selecionados'}
           </h3>
           <p className="text-slate-400 text-xs max-w-sm mx-auto mb-5">
-            {bills.length === 0
-              ? 'Cadastre contas recorrentes como luz, água, internet e aluguel para não esquecer de nenhum vencimento.'
+            {processedBills.length === 0
+              ? 'Não há contas cadastradas com vigência neste período ou antes dele.'
               : 'Tente alterar os filtros de status ou a busca para visualizar suas contas.'}
           </p>
-          {bills.length === 0 && (
+          {processedBills.length === 0 && (
             <button
-              onClick={onAdd}
+              onClick={() => onAdd(selectedYear, selectedMonth)}
               className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-blue-500/25"
             >
               <i className="fa-solid fa-plus text-xs"></i>
-              <span>Adicionar Primeira Conta</span>
+              <span>Adicionar Conta a Partir Deste Mês</span>
             </button>
           )}
         </div>

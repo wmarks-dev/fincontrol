@@ -118,6 +118,8 @@ export async function initDb() {
           estimated_amount REAL NOT NULL,
           category TEXT NOT NULL,
           status TEXT NOT NULL DEFAULT 'active',
+          start_year INTEGER,
+          start_month INTEGER,
           created_at TEXT DEFAULT (datetime('now'))
         );
         CREATE INDEX IF NOT EXISTS idx_bills_user ON bills(user_id);
@@ -202,6 +204,29 @@ export async function initDb() {
         await db.exec(`ALTER TABLE bill_payments ADD COLUMN amount REAL;`);
       } catch (e) {
         // column already exists, safe to ignore
+      }
+
+      try {
+        await db.exec(`ALTER TABLE bills ADD COLUMN start_year INTEGER;`);
+      } catch (e) {
+        // column already exists, safe to ignore
+      }
+
+      try {
+        await db.exec(`ALTER TABLE bills ADD COLUMN start_month INTEGER;`);
+      } catch (e) {
+        // column already exists, safe to ignore
+      }
+
+      try {
+        await db.exec(`
+          UPDATE bills
+          SET start_year = CAST(strftime('%Y', COALESCE(created_at, datetime('now'))) AS INTEGER),
+              start_month = CAST(strftime('%m', COALESCE(created_at, datetime('now'))) AS INTEGER) - 1
+          WHERE start_year IS NULL;
+        `);
+      } catch (e) {
+        // safe to ignore
       }
 
       return db;

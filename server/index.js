@@ -122,6 +122,9 @@ app.get('/api/data', async (req, res) => {
         estimatedAmount: Number(r.estimated_amount),
         category: r.category,
         status: r.status,
+        startYear: r.start_year !== null && r.start_year !== undefined ? Number(r.start_year) : undefined,
+        startMonth: r.start_month !== null && r.start_month !== undefined ? Number(r.start_month) : undefined,
+        createdAt: r.created_at || undefined,
       })),
       billPayments: billPaymentsRows.map(r => ({
         id: r.id,
@@ -642,15 +645,21 @@ app.post('/api/bills', async (req, res) => {
     const data = req.body;
     const id = data.id || randomUUID();
 
+    const now = new Date();
+    const startYear = data.startYear !== undefined ? Number(data.startYear) : now.getUTCFullYear();
+    const startMonth = data.startMonth !== undefined ? Number(data.startMonth) : now.getUTCMonth();
+
     await db.run(
-      'INSERT INTO bills (id, user_id, name, due_day, estimated_amount, category, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO bills (id, user_id, name, due_day, estimated_amount, category, status, start_year, start_month) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       id,
       userId,
       data.name,
       data.dueDay,
       data.estimatedAmount,
       data.category,
-      'active'
+      'active',
+      startYear,
+      startMonth
     );
 
     res.json({ success: true, id });
@@ -668,12 +677,14 @@ app.put('/api/bills/:id', async (req, res) => {
     const data = req.body;
 
     await db.run(
-      'UPDATE bills SET name = ?, due_day = ?, estimated_amount = ?, category = ?, status = ? WHERE id = ? AND user_id = ?',
+      'UPDATE bills SET name = ?, due_day = ?, estimated_amount = ?, category = ?, status = ?, start_year = COALESCE(?, start_year), start_month = COALESCE(?, start_month) WHERE id = ? AND user_id = ?',
       data.name,
       data.dueDay,
       data.estimatedAmount,
       data.category,
       data.status || 'active',
+      data.startYear !== undefined ? Number(data.startYear) : null,
+      data.startMonth !== undefined ? Number(data.startMonth) : null,
       id,
       userId
     );

@@ -49,7 +49,7 @@ const AppContent: React.FC = () => {
   const [savingsModalProps, setSavingsModalProps] = useState<{ isOpen: boolean; type: SavingsTransactionType }>({ isOpen: false, type: SavingsTransactionType.DEPOSIT });
   const [addLoanModalOpen, setAddLoanModalOpen] = useState(false);
   const [loanPaymentModalProps, setLoanPaymentModalProps] = useState<{ isOpen: boolean; loan: Loan | null }>({ isOpen: false, loan: null });
-  const [addBillModalProps, setAddBillModalProps] = useState<{isOpen: boolean, billToEdit: Bill | null}>({isOpen: false, billToEdit: null});
+  const [addBillModalProps, setAddBillModalProps] = useState<{isOpen: boolean, billToEdit: Bill | null, initialYear?: number, initialMonth?: number}>({isOpen: false, billToEdit: null});
   const [addBudgetModalProps, setAddBudgetModalProps] = useState<{isOpen: boolean, budgetToEdit: Budget | null, year: number, month: number}>({
     isOpen: false,
     budgetToEdit: null,
@@ -265,7 +265,7 @@ const AppContent: React.FC = () => {
           billPayments={data.billPayments}
           billMonthlyAmounts={data.billMonthlyAmounts}
           allCategories={data.allCategories}
-          onAdd={() => setAddBillModalProps({ isOpen: true, billToEdit: null })}
+          onAdd={(year, month) => setAddBillModalProps({ isOpen: true, billToEdit: null, initialYear: year, initialMonth: month })}
           onEdit={(bill) => setAddBillModalProps({ isOpen: true, billToEdit: bill })}
           onDelete={handleDeleteBill}
           onPayBill={handlePayBill}
@@ -453,6 +453,8 @@ const AppContent: React.FC = () => {
             onAdd={data.addBill}
             onUpdate={data.updateBill}
             billToEdit={addBillModalProps.billToEdit}
+            initialYear={addBillModalProps.initialYear}
+            initialMonth={addBillModalProps.initialMonth}
             onError={showError}
             allCategories={data.allCategories}
         />
