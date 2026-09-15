@@ -320,23 +320,69 @@ const AppContent: React.FC = () => {
     { view: 'settings', label: 'Ajustes', icon: 'fa-gear' },
   ] as const;
 
-  const NavButton: React.FC<{view: View, label: string, icon: string, onClick: (view: View) => void}> = ({ view, label, icon, onClick }) => {
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('fincontrol_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('fincontrol_sidebar_collapsed', String(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const NavButton: React.FC<{
+    view: View;
+    label: string;
+    icon: string;
+    onClick: (view: View) => void;
+    isCollapsed?: boolean;
+  }> = ({ view, label, icon, onClick, isCollapsed }) => {
     const isActive = activeView === view;
     return (
       <button
         onClick={() => onClick(view)}
-        className={`group flex flex-col sm:flex-row items-center justify-center sm:justify-start gap-3 px-3.5 py-2.5 rounded-xl transition-all duration-200 w-full text-left font-medium text-sm ${
+        title={isCollapsed ? label : undefined}
+        className={`group relative flex items-center rounded-xl transition-all duration-200 ${
+          isCollapsed
+            ? 'justify-center w-11 h-11 mx-auto'
+            : 'justify-start gap-3 px-3.5 py-2.5 w-full text-left font-medium text-sm'
+        } ${
           isActive
             ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/25 font-semibold'
             : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
         }`}
       >
-        <div className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
-          isActive ? 'bg-white/20 text-white' : 'text-slate-400 group-hover:text-blue-400 group-hover:bg-blue-500/10'
-        }`}>
-          <i className={`fa-solid ${icon} text-sm`}></i>
+        <div
+          className={`flex items-center justify-center transition-colors ${
+            isCollapsed ? 'w-full h-full text-base' : 'w-7 h-7 rounded-lg text-sm'
+          } ${
+            isActive && !isCollapsed
+              ? 'bg-white/20 text-white'
+              : isCollapsed
+              ? isActive
+                ? 'text-white'
+                : 'text-slate-400 group-hover:text-blue-400'
+              : 'text-slate-400 group-hover:text-blue-400 group-hover:bg-blue-500/10'
+          }`}
+        >
+          <i className={`fa-solid ${icon}`}></i>
         </div>
-        <span className="text-xs sm:text-sm">{label}</span>
+        {!isCollapsed && <span className="text-xs sm:text-sm truncate">{label}</span>}
+
+        {/* Tooltip on hover when collapsed */}
+        {isCollapsed && (
+          <span className="pointer-events-none absolute left-full ml-3 px-2.5 py-1 bg-slate-800 text-white text-xs font-semibold rounded-lg shadow-xl border border-white/10 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50">
+            {label}
+          </span>
+        )}
       </button>
     );
   };
@@ -346,28 +392,93 @@ const AppContent: React.FC = () => {
   return (
     <div className="flex flex-col md:flex-row min-h-screen text-slate-100">
       {/* Desktop Sidebar (visible on md and up) */}
-      <nav className="hidden md:flex md:w-64 bg-slate-900/80 backdrop-blur-xl p-4 flex-col justify-between items-stretch gap-2 border-r border-white/[0.08]">
+      <nav
+        className={`hidden md:flex transition-all duration-300 ease-in-out bg-slate-900/80 backdrop-blur-xl flex-col justify-between items-stretch gap-2 border-r border-white/[0.08] relative z-20 ${
+          isSidebarCollapsed ? 'md:w-20 p-2.5' : 'md:w-64 p-4'
+        }`}
+      >
         <div className="flex flex-col w-full h-full">
-          <div className="flex flex-col items-center gap-2.5 mb-6 flex-shrink-0 bg-slate-800/40 p-4 rounded-2xl border border-white/[0.06] shadow-sm">
-            <div className="w-14 h-14 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center text-white text-xl font-bold shadow-lg shadow-blue-500/25 border border-white/20">
+          {/* Header Card / User Info */}
+          {!isSidebarCollapsed ? (
+            <div className="flex flex-col items-center gap-2.5 mb-6 flex-shrink-0 bg-slate-800/40 p-4 rounded-2xl border border-white/[0.06] shadow-sm relative">
+              <button
+                onClick={toggleSidebar}
+                className="absolute top-3 right-3 w-7 h-7 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-xs transition-colors border border-white/5"
+                title="Recolher menu lateral (somente ícones)"
+                aria-label="Recolher menu lateral"
+              >
+                <i className="fa-solid fa-chevron-left"></i>
+              </button>
+              <div className="w-14 h-14 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center text-white text-xl font-bold shadow-lg shadow-blue-500/25 border border-white/20">
                 {currentUser?.displayName?.charAt(0).toUpperCase()}
-            </div>
-            <div className="text-center">
-              <h1 className="text-base font-bold text-white leading-tight">Olá, {currentUser?.displayName}</h1>
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 mt-1.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                <span>SQLite Local</span>
+              </div>
+              <div className="text-center">
+                <h1 className="text-base font-bold text-white leading-tight truncate max-w-[170px]">
+                  Olá, {currentUser?.displayName}
+                </h1>
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 mt-1.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>SQLite Local</span>
+                </div>
               </div>
             </div>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            {[...mainNavItems, ...moreNavItems].map(item => <NavButton key={item.view} {...item} onClick={handleNavClick} />)}
-          </div>
-          <div className="mt-auto pt-4 border-t border-slate-700/50">
-              <button onClick={logout} className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-all duration-200 w-full text-left text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 text-sm font-medium">
-                  <i className="fa-solid fa-sign-out-alt w-5 text-center"></i>
-                  <span>Sair</span>
+          ) : (
+            <div className="flex flex-col items-center gap-2 mb-6 flex-shrink-0 bg-slate-800/40 p-2 rounded-2xl border border-white/[0.06] shadow-sm">
+              <button
+                onClick={toggleSidebar}
+                className="w-10 h-10 rounded-xl bg-slate-800 hover:bg-blue-600 hover:text-white text-slate-400 flex items-center justify-center text-sm transition-all border border-white/5 shadow-sm group"
+                title="Expandir menu lateral"
+                aria-label="Expandir menu lateral"
+              >
+                <i className="fa-solid fa-chevron-right transition-transform group-hover:translate-x-0.5"></i>
               </button>
+              <div className="relative group">
+                <div className="w-10 h-10 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center text-white text-sm font-bold shadow-md shadow-blue-500/25 border border-white/20">
+                  {currentUser?.displayName?.charAt(0).toUpperCase()}
+                </div>
+                <span
+                  className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-slate-900 animate-pulse"
+                  title="SQLite Conectado"
+                ></span>
+              </div>
+            </div>
+          )}
+
+          {/* Navigation Items */}
+          <div className="flex flex-col gap-1.5 flex-1 overflow-y-auto custom-scrollbar">
+            {[...mainNavItems, ...moreNavItems].map((item) => (
+              <NavButton
+                key={item.view}
+                {...item}
+                onClick={handleNavClick}
+                isCollapsed={isSidebarCollapsed}
+              />
+            ))}
+          </div>
+
+          {/* Logout Button */}
+          <div className="mt-auto pt-4 border-t border-slate-700/50">
+            {!isSidebarCollapsed ? (
+              <button
+                onClick={logout}
+                className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-all duration-200 w-full text-left text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 text-sm font-medium"
+              >
+                <i className="fa-solid fa-sign-out-alt w-5 text-center"></i>
+                <span>Sair</span>
+              </button>
+            ) : (
+              <button
+                onClick={logout}
+                className="group relative flex items-center justify-center w-11 h-11 mx-auto rounded-xl transition-all duration-200 text-rose-400 hover:bg-rose-500/15 hover:text-rose-300"
+                title="Sair"
+                aria-label="Sair"
+              >
+                <i className="fa-solid fa-sign-out-alt text-base"></i>
+                <span className="pointer-events-none absolute left-full ml-3 px-2.5 py-1 bg-slate-800 text-rose-300 text-xs font-semibold rounded-lg shadow-xl border border-white/10 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50">
+                  Sair
+                </span>
+              </button>
+            )}
           </div>
         </div>
       </nav>
