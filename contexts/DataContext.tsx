@@ -17,7 +17,7 @@ import {
 } from '../types';
 import { CATEGORIES } from '../constants';
 import { parseISODateAsUTC } from '../utils/dateUtils';
-import { api } from '../services/api';
+import { api, RestoreResponse } from '../services/api';
 
 export interface DataContextType {
     // Read-only State
@@ -63,6 +63,12 @@ export interface DataContextType {
     addCategory: (categoryData: Omit<Category, 'id'>) => Promise<void>;
     updateCategory: (updatedCategory: Category) => Promise<void>;
     deleteCategory: (categoryId: string) => Promise<void>;
+
+    // Backup & Restore
+    exportBackup: () => Promise<void>;
+    downloadSqlite: () => Promise<void>;
+    restoreBackup: (backup: any) => Promise<RestoreResponse>;
+    refreshData: () => Promise<void>;
 
     pendingBillPayment: { billId: string; year: number; month: number } | null;
     setPendingBillPayment: React.Dispatch<React.SetStateAction<{ billId: string; year: number; month: number } | null>>;
@@ -351,6 +357,23 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         await refreshData();
     };
 
+    const exportBackup = async () => {
+        if (!userId) throw new Error('Usuário não autenticado');
+        await api.downloadBackupJson(userId);
+    };
+
+    const downloadSqlite = async () => {
+        if (!userId) throw new Error('Usuário não autenticado');
+        await api.downloadSqliteDb(userId);
+    };
+
+    const restoreBackup = async (backup: any) => {
+        if (!userId) throw new Error('Usuário não autenticado');
+        const res = await api.restoreBackup(userId, backup);
+        await refreshData();
+        return res;
+    };
+
     const value: DataContextType = {
         transactions,
         recurringTransactions,
@@ -392,6 +415,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         addCategory,
         updateCategory,
         deleteCategory,
+        exportBackup,
+        downloadSqlite,
+        restoreBackup,
+        refreshData,
         pendingBillPayment,
         setPendingBillPayment,
     };

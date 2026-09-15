@@ -231,4 +231,94 @@ export const api = {
     request<{ success: boolean }>(`/api/categories/${id}`, userId, {
       method: 'DELETE',
     }),
+
+  // Backup & Restore
+  exportBackupData: (userId: string) => request<BackupPayload>('/api/backup', userId),
+
+  downloadBackupJson: async (userId: string) => {
+    const data = await request<BackupPayload>('/api/backup', userId);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `fincontrol-backup-${dateStr}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    return data;
+  },
+
+  downloadSqliteDb: async (userId: string) => {
+    const response = await fetch('/api/backup/sqlite', {
+      headers: {
+        'x-user-id': userId,
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`Falha ao baixar banco SQLite: ${response.statusText}`);
+    }
+    const blob = await response.blob();
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `fincontrol-database-${dateStr}.sqlite`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  },
+
+  restoreBackup: (userId: string, backup: any) =>
+    request<RestoreResponse>('/api/restore', userId, {
+      method: 'POST',
+      body: JSON.stringify({ backup }),
+    }),
 };
+
+export interface BackupPayload {
+  app: string;
+  version: string;
+  exportedAt: string;
+  userId: string;
+  data: {
+    transactions: any[];
+    recurringTransactions: any[];
+    creditCards: any[];
+    savingsTransactions: any[];
+    loans: any[];
+    loanPayments: any[];
+    bills: any[];
+    billPayments: any[];
+    billMonthlyAmounts: any[];
+    budgets: any[];
+    financialGoals: any[];
+    goalContributions: any[];
+    customCategories: any[];
+  };
+  summary: {
+    totalTransactions: number;
+    totalCreditCards: number;
+    totalBills: number;
+    totalBudgets: number;
+    totalGoals: number;
+    totalSavings: number;
+    totalLoans: number;
+  };
+}
+
+export interface RestoreResponse {
+  success: boolean;
+  stats: {
+    transactions: number;
+    creditCards: number;
+    bills: number;
+    budgets: number;
+    financialGoals: number;
+    savingsTransactions: number;
+    loans: number;
+    customCategories: number;
+  };
+}

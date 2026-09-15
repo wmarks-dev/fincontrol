@@ -1,13 +1,13 @@
 import express from 'express';
 import cors from 'cors';
 import { randomUUID } from 'crypto';
-import { initDb } from './db.js';
+import { initDb, dbPath } from './db.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 // User authentication header middleware
 const requireUser = (req, res, next) => {
@@ -971,6 +971,396 @@ app.delete('/api/categories/:id', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Erro em DELETE /api/categories/:id:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ----------------------------------------------------
+// Backup & Restore
+// ----------------------------------------------------
+
+// 1. Export structured JSON backup
+app.get('/api/backup', async (req, res) => {
+  try {
+    const db = await initDb();
+    const userId = req.userId;
+
+    const [
+      transactions,
+      recurringTransactions,
+      creditCards,
+      savingsTransactions,
+      loans,
+      loanPayments,
+      bills,
+      billPayments,
+      billMonthlyAmounts,
+      budgets,
+      financialGoals,
+      goalContributions,
+      customCategories,
+    ] = await Promise.all([
+      db.all('SELECT * FROM transactions WHERE user_id = ?', userId),
+      db.all('SELECT * FROM recurring_transactions WHERE user_id = ?', userId),
+      db.all('SELECT * FROM credit_cards WHERE user_id = ?', userId),
+      db.all('SELECT * FROM savings_transactions WHERE user_id = ?', userId),
+      db.all('SELECT * FROM loans WHERE user_id = ?', userId),
+      db.all('SELECT * FROM loan_payments WHERE user_id = ?', userId),
+      db.all('SELECT * FROM bills WHERE user_id = ?', userId),
+      db.all('SELECT * FROM bill_payments WHERE user_id = ?', userId),
+      db.all('SELECT * FROM bill_monthly_amounts WHERE user_id = ?', userId),
+      db.all('SELECT * FROM budgets WHERE user_id = ?', userId),
+      db.all('SELECT * FROM financial_goals WHERE user_id = ?', userId),
+      db.all('SELECT * FROM goal_contributions WHERE user_id = ?', userId),
+      db.all('SELECT * FROM custom_categories WHERE user_id = ?', userId),
+    ]);
+
+    const backupPayload = {
+      app: 'FinControl',
+      version: '1.0',
+      exportedAt: new Date().toISOString(),
+      userId,
+      data: {
+        transactions,
+        recurringTransactions,
+        creditCards,
+        savingsTransactions,
+        loans,
+        loanPayments,
+        bills,
+        billPayments,
+        billMonthlyAmounts,
+        budgets,
+        financialGoals,
+        goalContributions,
+        customCategories,
+      },
+      summary: {
+        totalTransactions: transactions.length,
+        totalCreditCards: creditCards.length,
+        totalBills: bills.length,
+        totalBudgets: budgets.length,
+        totalGoals: financialGoals.length,
+        totalSavings: savingsTransactions.length,
+        totalLoans: loans.length,
+      },
+    };
+
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="fincontrol-backup-${dateStr}.json"`);
+    res.json(backupPayload);
+  } catch (error) {
+    console.error('Erro em GET /api/backup:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 2. Download raw SQLite file (with WAL checkpoint)
+app.get('/api/backup/sqlite', async (req, res) => {
+  try {
+    const db = await initDb();
+    await db.run('PRAGMA wal_checkpoint(TRUNCATE);');
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    res.download(dbPath, `fincontrol-database-${dateStr}.sqlite`);
+  } catch (error) {
+    console.error('Erro em GET /api/backup/sqlite:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 3. Restore backup from JSON payload
+app.post('/api/restore', async (req, res) => {
+  try {
+    const db = await initDb();
+    const userId = req.userId;
+    const { backup } = req.body;
+
+    if (!backup || (!backup.data && !backup.transactions)) {
+      return res.status(400).json({ error: 'Arquivo de backup inválido ou vazio.' });
+    }
+
+    const data = backup.data || backup;
+
+    await db.run('BEGIN TRANSACTION');
+    try {
+      // Clear current user records
+      await db.run('DELETE FROM goal_contributions WHERE user_id = ?', userId);
+      await db.run('DELETE FROM financial_goals WHERE user_id = ?', userId);
+      await db.run('DELETE FROM budgets WHERE user_id = ?', userId);
+      await db.run('DELETE FROM bill_monthly_amounts WHERE user_id = ?', userId);
+      await db.run('DELETE FROM bill_payments WHERE user_id = ?', userId);
+      await db.run('DELETE FROM bills WHERE user_id = ?', userId);
+      await db.run('DELETE FROM loan_payments WHERE user_id = ?', userId);
+      await db.run('DELETE FROM loans WHERE user_id = ?', userId);
+      await db.run('DELETE FROM savings_transactions WHERE user_id = ?', userId);
+      await db.run('DELETE FROM recurring_transactions WHERE user_id = ?', userId);
+      await db.run('DELETE FROM transactions WHERE user_id = ?', userId);
+      await db.run('DELETE FROM credit_cards WHERE user_id = ?', userId);
+      await db.run('DELETE FROM custom_categories WHERE user_id = ?', userId);
+
+      // Re-insert transactions
+      if (Array.isArray(data.transactions)) {
+        for (const t of data.transactions) {
+          await db.run(
+            `INSERT INTO transactions (
+              id, user_id, description, amount, date, type, category,
+              payment_method, credit_card_id, installment_id, recurring_id, is_paid
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            t.id,
+            userId,
+            t.description,
+            t.amount,
+            t.date,
+            t.type,
+            t.category,
+            t.payment_method || t.paymentMethod,
+            t.credit_card_id || t.creditCardId || null,
+            t.installment_id || t.installmentId || null,
+            t.recurring_id || t.recurringId || null,
+            t.is_paid !== undefined ? (t.is_paid ? 1 : 0) : (t.isPaid ? 1 : 0)
+          );
+        }
+      }
+
+      // Re-insert recurring transactions
+      if (Array.isArray(data.recurringTransactions)) {
+        for (const r of data.recurringTransactions) {
+          await db.run(
+            `INSERT INTO recurring_transactions (
+              id, user_id, description, amount, date, type, category,
+              payment_method, credit_card_id, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            r.id,
+            userId,
+            r.description,
+            r.amount,
+            r.date,
+            r.type,
+            r.category,
+            r.payment_method || r.paymentMethod,
+            r.credit_card_id || r.creditCardId || null,
+            r.status || 'active'
+          );
+        }
+      }
+
+      // Re-insert credit cards
+      if (Array.isArray(data.creditCards)) {
+        for (const c of data.creditCards) {
+          await db.run(
+            `INSERT INTO credit_cards (
+              id, user_id, name, closing_day, due_day, limit_amount, theme
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            c.id,
+            userId,
+            c.name,
+            c.closing_day || c.closingDay,
+            c.due_day || c.dueDay,
+            c.limit_amount || c.limit,
+            c.theme || 'black'
+          );
+        }
+      }
+
+      // Re-insert savings
+      if (Array.isArray(data.savingsTransactions)) {
+        for (const s of data.savingsTransactions) {
+          await db.run(
+            `INSERT INTO savings_transactions (
+              id, user_id, type, amount, date, description
+            ) VALUES (?, ?, ?, ?, ?, ?)`,
+            s.id,
+            userId,
+            s.type,
+            s.amount,
+            s.date,
+            s.description || ''
+          );
+        }
+      }
+
+      // Re-insert loans
+      if (Array.isArray(data.loans)) {
+        for (const l of data.loans) {
+          await db.run(
+            `INSERT INTO loans (
+              id, user_id, type, person, initial_amount, paid_amount, date, description, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            l.id,
+            userId,
+            l.type,
+            l.person,
+            l.initial_amount || l.initialAmount,
+            l.paid_amount !== undefined ? l.paid_amount : (l.paidAmount || 0),
+            l.date,
+            l.description || '',
+            l.status || 'active'
+          );
+        }
+      }
+
+      // Re-insert loan payments
+      if (Array.isArray(data.loanPayments)) {
+        for (const lp of data.loanPayments) {
+          await db.run(
+            `INSERT INTO loan_payments (
+              id, user_id, loan_id, amount, date
+            ) VALUES (?, ?, ?, ?, ?)`,
+            lp.id,
+            userId,
+            lp.loan_id || lp.loanId,
+            lp.amount,
+            lp.date
+          );
+        }
+      }
+
+      // Re-insert bills
+      if (Array.isArray(data.bills)) {
+        for (const b of data.bills) {
+          await db.run(
+            `INSERT INTO bills (
+              id, user_id, name, due_day, estimated_amount, category, status, start_year, start_month
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            b.id,
+            userId,
+            b.name,
+            b.due_day || b.dueDay,
+            b.estimated_amount || b.estimatedAmount,
+            b.category,
+            b.status || 'active',
+            b.start_year !== undefined ? b.start_year : (b.startYear !== undefined ? b.startYear : null),
+            b.start_month !== undefined ? b.start_month : (b.startMonth !== undefined ? b.startMonth : null)
+          );
+        }
+      }
+
+      // Re-insert bill payments
+      if (Array.isArray(data.billPayments)) {
+        for (const bp of data.billPayments) {
+          await db.run(
+            `INSERT INTO bill_payments (
+              id, user_id, bill_id, year, month, amount
+            ) VALUES (?, ?, ?, ?, ?, ?)`,
+            bp.id,
+            userId,
+            bp.bill_id || bp.billId,
+            bp.year,
+            bp.month,
+            bp.amount || null
+          );
+        }
+      }
+
+      // Re-insert bill monthly amounts
+      if (Array.isArray(data.billMonthlyAmounts)) {
+        for (const ma of data.billMonthlyAmounts) {
+          await db.run(
+            `INSERT INTO bill_monthly_amounts (
+              id, user_id, bill_id, year, month, amount
+            ) VALUES (?, ?, ?, ?, ?, ?)`,
+            ma.id,
+            userId,
+            ma.bill_id || ma.billId,
+            ma.year,
+            ma.month,
+            ma.amount
+          );
+        }
+      }
+
+      // Re-insert budgets
+      if (Array.isArray(data.budgets)) {
+        for (const bg of data.budgets) {
+          await db.run(
+            `INSERT INTO budgets (
+              id, user_id, category_id, amount, month, year
+            ) VALUES (?, ?, ?, ?, ?, ?)`,
+            bg.id,
+            userId,
+            bg.category_id || bg.categoryId,
+            bg.amount,
+            bg.month,
+            bg.year
+          );
+        }
+      }
+
+      // Re-insert financial goals
+      if (Array.isArray(data.financialGoals)) {
+        for (const fg of data.financialGoals) {
+          await db.run(
+            `INSERT INTO financial_goals (
+              id, user_id, name, target_amount, current_amount, target_date, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            fg.id,
+            userId,
+            fg.name,
+            fg.target_amount || fg.targetAmount,
+            fg.current_amount !== undefined ? fg.current_amount : (fg.currentAmount || 0),
+            fg.target_date || fg.targetDate || null,
+            fg.status || 'active'
+          );
+        }
+      }
+
+      // Re-insert goal contributions
+      if (Array.isArray(data.goalContributions)) {
+        for (const gc of data.goalContributions) {
+          await db.run(
+            `INSERT INTO goal_contributions (
+              id, user_id, goal_id, savings_transaction_id, amount, date
+            ) VALUES (?, ?, ?, ?, ?, ?)`,
+            gc.id,
+            userId,
+            gc.goal_id || gc.goalId,
+            gc.savings_transaction_id || gc.savingsTransactionId,
+            gc.amount,
+            gc.date
+          );
+        }
+      }
+
+      // Re-insert custom categories
+      if (Array.isArray(data.customCategories)) {
+        for (const cat of data.customCategories) {
+          await db.run(
+            `INSERT INTO custom_categories (
+              id, user_id, name, icon, is_custom
+            ) VALUES (?, ?, ?, ?, ?)`,
+            cat.id,
+            userId,
+            cat.name,
+            cat.icon,
+            cat.is_custom !== undefined ? (cat.is_custom ? 1 : 0) : (cat.isCustom ? 1 : 0)
+          );
+        }
+      }
+
+      await db.run('COMMIT');
+
+      res.json({
+        success: true,
+        stats: {
+          transactions: (data.transactions || []).length,
+          creditCards: (data.creditCards || []).length,
+          bills: (data.bills || []).length,
+          budgets: (data.budgets || []).length,
+          financialGoals: (data.financialGoals || []).length,
+          savingsTransactions: (data.savingsTransactions || []).length,
+          loans: (data.loans || []).length,
+          customCategories: (data.customCategories || []).length,
+        },
+      });
+    } catch (err) {
+      await db.run('ROLLBACK');
+      throw err;
+    }
+  } catch (error) {
+    console.error('Erro em POST /api/restore:', error);
     res.status(500).json({ error: error.message });
   }
 });
