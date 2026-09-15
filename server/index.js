@@ -217,7 +217,7 @@ app.post('/api/transactions', async (req, res) => {
 
       if (pendingBillPayment) {
         const paymentId = pendingBillPayment.id || randomUUID();
-        const txAmount = newTransactionsData[0]?.amount;
+        const txAmount = transactions[0]?.amount;
         await db.run(
           'INSERT INTO bill_payments (id, user_id, bill_id, year, month, amount) VALUES (?, ?, ?, ?, ?, ?)',
           paymentId,
