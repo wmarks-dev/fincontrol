@@ -341,11 +341,13 @@ const AppContent: React.FC = () => {
     );
   };
 
+  const isMoreActive = !['dashboard', 'transactions', 'bills'].includes(activeView);
+
   return (
     <div className="flex flex-col md:flex-row min-h-screen text-slate-100">
-      <nav className="md:w-64 bg-slate-900/80 backdrop-blur-xl p-4 flex md:flex-col justify-between items-center md:items-stretch md:justify-start gap-4 md:gap-2 border-b md:border-b-0 md:border-r border-white/[0.08]">
-        
-        <div className="hidden md:flex flex-col w-full h-full">
+      {/* Desktop Sidebar (visible on md and up) */}
+      <nav className="hidden md:flex md:w-64 bg-slate-900/80 backdrop-blur-xl p-4 flex-col justify-between items-stretch gap-2 border-r border-white/[0.08]">
+        <div className="flex flex-col w-full h-full">
           <div className="flex flex-col items-center gap-2.5 mb-6 flex-shrink-0 bg-slate-800/40 p-4 rounded-2xl border border-white/[0.06] shadow-sm">
             <div className="w-14 h-14 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center text-white text-xl font-bold shadow-lg shadow-blue-500/25 border border-white/20">
                 {currentUser?.displayName?.charAt(0).toUpperCase()}
@@ -368,52 +370,235 @@ const AppContent: React.FC = () => {
               </button>
           </div>
         </div>
-        
-        <div className="md:hidden flex-grow overflow-x-auto custom-scrollbar">
-          <div className="flex flex-nowrap items-center gap-2">
-            {mainNavItems.map(item => <NavButton key={item.view} {...item} onClick={handleNavClick} />)}
-            <div className="relative" ref={mobileMenuRef}>
-              <button onClick={() => setIsMobileMenuOpen(prev => !prev)} className={`flex flex-col sm:flex-row items-center justify-center sm:justify-start gap-2 px-3 py-2 rounded-xl transition-colors duration-200 w-full text-left ${isMobileMenuOpen ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
-                <i className="fa-solid fa-ellipsis-h w-5 text-center"></i>
-                <span className="text-xs sm:text-sm font-medium">Mais</span>
-              </button>
-              {isMobileMenuOpen && (
-                <div className="absolute bottom-full mb-2 left-0 sm:left-auto sm:right-0 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl py-2 z-20 min-w-[190px]">
-                  {moreNavItems.map(item => (
-                    <button key={item.view} onClick={() => handleNavClick(item.view)} className={`flex items-center gap-3 px-4 py-2.5 w-full text-left text-sm ${activeView === item.view ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700/60'}`}>
-                      <i className={`fa-solid ${item.icon} w-5 text-center`}></i>
-                      <span>{item.label}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
+      </nav>
+
+      {/* Mobile Sticky Top Header */}
+      <header className="md:hidden sticky top-0 z-30 bg-slate-900/90 backdrop-blur-xl border-b border-white/[0.08] px-4 py-3 flex items-center justify-between shadow-md">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center text-white text-sm font-bold shadow-md shadow-blue-500/20 border border-white/20">
+            {currentUser?.displayName?.charAt(0).toUpperCase()}
+          </div>
+          <div>
+            <div className="flex items-center gap-1.5">
+              <h1 className="text-sm font-bold text-white leading-tight">
+                Olá, {currentUser?.displayName?.split(' ')[0]}
+              </h1>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
             </div>
+            <p className="text-[10px] text-slate-400 font-medium">FinControl SQLite</p>
           </div>
         </div>
 
-        <div className="md:hidden flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsMobileMenuOpen(true)}
+            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold border border-white/10 flex items-center gap-1.5 transition-colors"
+          >
+            <i className="fa-solid fa-layer-group text-xs text-blue-400"></i>
+            <span>Menus</span>
+          </button>
           <button
             onClick={logout}
-            className="flex flex-col items-center justify-center h-full w-14 px-2 py-1.5 rounded-xl text-rose-400 hover:bg-rose-500/10 transition-colors"
+            className="w-8 h-8 rounded-xl bg-slate-800/80 hover:bg-rose-500/15 text-slate-400 hover:text-rose-400 border border-white/5 flex items-center justify-center text-xs transition-colors"
+            title="Sair"
             aria-label="Sair"
           >
-            <i className="fa-solid fa-sign-out-alt text-lg"></i>
-            <span className="text-xs mt-0.5 font-medium">Sair</span>
+            <i className="fa-solid fa-sign-out-alt"></i>
           </button>
         </div>
-      </nav>
+      </header>
 
-      <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto custom-scrollbar">
+      {/* Main Content Area */}
+      <main className="flex-1 p-4 sm:p-6 lg:p-8 pb-28 md:pb-8 overflow-y-auto custom-scrollbar">
         {renderView()}
       </main>
       
+      {/* Desktop Floating Action Button */}
       <button
         onClick={() => { setEditingTransaction(null); setIsModalOpen(true); }}
-        className="fixed bottom-6 right-6 bg-gradient-to-tr from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-2xl w-14 h-14 flex items-center justify-center shadow-xl shadow-blue-600/30 transition-all duration-300 hover:scale-105 active:scale-95"
+        className="hidden md:flex fixed bottom-6 right-6 bg-gradient-to-tr from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-2xl w-14 h-14 items-center justify-center shadow-xl shadow-blue-600/30 transition-all duration-300 hover:scale-105 active:scale-95 z-30"
         aria-label="Adicionar Transação"
       >
-        <i className="fa-solid fa-plus text-2xl transition-transform duration-300 group-hover:rotate-90"></i>
+        <i className="fa-solid fa-plus text-2xl transition-transform duration-300 hover:rotate-90"></i>
       </button>
+
+      {/* Mobile Bottom Navigation Dock */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-2xl border-t border-white/[0.08] px-2 py-1.5 flex items-center justify-around shadow-2xl shadow-black">
+        {/* 1. Dashboard */}
+        <button
+          onClick={() => handleNavClick('dashboard')}
+          className={`flex flex-col items-center justify-center flex-1 py-1 transition-all ${
+            activeView === 'dashboard'
+              ? 'text-blue-400 font-bold'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
+            activeView === 'dashboard' ? 'bg-blue-500/20 text-blue-400 shadow-sm shadow-blue-500/30' : ''
+          }`}>
+            <i className="fa-solid fa-chart-pie text-sm"></i>
+          </div>
+          <span className="text-[10px] mt-0.5 tracking-tight font-medium">Início</span>
+        </button>
+
+        {/* 2. Transactions */}
+        <button
+          onClick={() => handleNavClick('transactions')}
+          className={`flex flex-col items-center justify-center flex-1 py-1 transition-all ${
+            activeView === 'transactions'
+              ? 'text-blue-400 font-bold'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
+            activeView === 'transactions' ? 'bg-blue-500/20 text-blue-400 shadow-sm shadow-blue-500/30' : ''
+          }`}>
+            <i className="fa-solid fa-exchange-alt text-sm"></i>
+          </div>
+          <span className="text-[10px] mt-0.5 tracking-tight font-medium">Extrato</span>
+        </button>
+
+        {/* 3. Center Elevated Plus Button */}
+        <div className="flex-1 flex justify-center -mt-6">
+          <button
+            onClick={() => { setEditingTransaction(null); setIsModalOpen(true); }}
+            className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-blue-500 text-white flex items-center justify-center shadow-xl shadow-blue-600/40 border-2 border-slate-900 active:scale-95 transition-all hover:scale-105"
+            aria-label="Nova Transação"
+          >
+            <i className="fa-solid fa-plus text-xl"></i>
+          </button>
+        </div>
+
+        {/* 4. Bills */}
+        <button
+          onClick={() => handleNavClick('bills')}
+          className={`flex flex-col items-center justify-center flex-1 py-1 transition-all ${
+            activeView === 'bills'
+              ? 'text-blue-400 font-bold'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
+            activeView === 'bills' ? 'bg-blue-500/20 text-blue-400 shadow-sm shadow-blue-500/30' : ''
+          }`}>
+            <i className="fa-solid fa-file-invoice-dollar text-sm"></i>
+          </div>
+          <span className="text-[10px] mt-0.5 tracking-tight font-medium">Contas</span>
+        </button>
+
+        {/* 5. More Menu */}
+        <button
+          onClick={() => setIsMobileMenuOpen(true)}
+          className={`flex flex-col items-center justify-center flex-1 py-1 transition-all ${
+            isMoreActive
+              ? 'text-blue-400 font-bold'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <div className={`w-8 h-8 rounded-xl flex items-center justify-center relative transition-all ${
+            isMoreActive ? 'bg-blue-500/20 text-blue-400 shadow-sm shadow-blue-500/30' : ''
+          }`}>
+            <i className="fa-solid fa-bars text-sm"></i>
+            {isMoreActive && (
+              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-blue-400 rounded-full"></span>
+            )}
+          </div>
+          <span className="text-[10px] mt-0.5 tracking-tight font-medium">Mais</span>
+        </button>
+      </nav>
+
+      {/* Mobile "Mais" Bottom Sheet Drawer */}
+      {isMobileMenuOpen && (
+        <div
+          className="md:hidden fixed inset-0 z-50 flex flex-col justify-end bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={() => setIsMobileMenuOpen(false)}
+        >
+          <div
+            ref={mobileMenuRef}
+            className="bg-slate-900 border-t border-white/10 rounded-t-3xl shadow-2xl p-5 max-h-[85vh] overflow-y-auto custom-scrollbar flex flex-col space-y-4 animate-in slide-in-from-bottom duration-300"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Grabber Handle */}
+            <div className="w-12 h-1.5 bg-slate-700 rounded-full mx-auto -mt-1 mb-1"></div>
+
+            {/* Drawer Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-400 flex items-center justify-center text-sm">
+                  <i className="fa-solid fa-layer-group"></i>
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-base">Módulos & Ferramentas</h3>
+                  <p className="text-xs text-slate-400">Acesse todas as áreas do FinControl</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors flex items-center justify-center text-sm border border-white/5"
+              >
+                <i className="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+
+            {/* Grid of All Additional Menus */}
+            <div className="grid grid-cols-2 gap-2.5 py-1">
+              {[
+                { view: 'reports' as const, label: 'Relatórios', icon: 'fa-chart-line', iconColor: 'text-blue-400', desc: 'Evolução e gráficos' },
+                { view: 'budget' as const, label: 'Orçamentos', icon: 'fa-bullseye', iconColor: 'text-purple-400', desc: 'Metas por categoria' },
+                { view: 'goals' as const, label: 'Metas', icon: 'fa-flag-checkered', iconColor: 'text-amber-400', desc: 'Objetivos financeiros' },
+                { view: 'cards' as const, label: 'Cartões', icon: 'fa-credit-card', iconColor: 'text-sky-400', desc: 'Faturas e limites' },
+                { view: 'savings' as const, label: 'Poupança', icon: 'fa-piggy-bank', iconColor: 'text-emerald-400', desc: 'Reserva e aportes' },
+                { view: 'loans' as const, label: 'Empréstimos', icon: 'fa-hand-holding-dollar', iconColor: 'text-rose-400', desc: 'Gestão de dívidas' },
+                { view: 'recurring' as const, label: 'Recorrências', icon: 'fa-sync-alt', iconColor: 'text-indigo-400', desc: 'Gastos fixos mensais' },
+                { view: 'settings' as const, label: 'Ajustes', icon: 'fa-gear', iconColor: 'text-slate-300', desc: 'Categorias e opções' },
+              ].map((item) => {
+                const isActive = activeView === item.view;
+                return (
+                  <button
+                    key={item.view}
+                    onClick={() => handleNavClick(item.view)}
+                    className={`flex flex-col p-3 rounded-2xl border text-left transition-all ${
+                      isActive
+                        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-blue-400/50 shadow-lg shadow-blue-500/20'
+                        : 'bg-slate-800/60 hover:bg-slate-800 border-white/[0.06]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm ${
+                        isActive ? 'bg-white/20 text-white' : 'bg-slate-800/80 ' + item.iconColor
+                      }`}>
+                        <i className={`fa-solid ${item.icon}`}></i>
+                      </div>
+                      {isActive && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-white/20 text-white">
+                          Ativo
+                        </span>
+                      )}
+                    </div>
+                    <span className={`text-sm font-bold truncate ${isActive ? 'text-white' : 'text-slate-200'}`}>
+                      {item.label}
+                    </span>
+                    <span className={`text-[11px] truncate ${isActive ? 'text-blue-100' : 'text-slate-400'}`}>
+                      {item.desc}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Logout button at bottom of drawer */}
+            <div className="pt-2 border-t border-white/[0.08]">
+              <button
+                onClick={logout}
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 text-sm font-bold border border-rose-500/20 transition-colors"
+              >
+                <i className="fa-solid fa-sign-out-alt"></i>
+                <span>Sair da Conta</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isModalOpen && (
         <AddTransactionModal
