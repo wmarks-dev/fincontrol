@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Transaction, CreditCard, TransactionType, SavingsTransaction, SavingsTransactionType, PaymentMethod, Bill, BillPayment, Budget, FinancialGoal, Category } from '../types';
+import { Transaction, CreditCard, TransactionType, SavingsTransaction, SavingsTransactionType, PaymentMethod, Bill, BillPayment, BillMonthlyAmount, Budget, FinancialGoal, Category } from '../types';
 import { getBillInfoForTransaction, getCurrentOpenBillInfo, parseISODateAsUTC, getMostRecentlyClosedBillInfo } from '../utils/dateUtils';
 import { useUser } from '../contexts/UserContext';
 
@@ -9,10 +9,11 @@ interface DashboardProps {
   savingsTransactions: SavingsTransaction[];
   bills: Bill[];
   billPayments: BillPayment[];
+  billMonthlyAmounts?: BillMonthlyAmount[];
   budgets: Budget[];
   financialGoals: FinancialGoal[];
   allCategories: Category[];
-  onPayBill: (bill: Bill, nextDueDate: Date) => void;
+  onPayBill: (bill: Bill, nextDueDate: Date, customAmount?: number) => void;
   onBudgetCategoryClick: (categoryId: string) => void;
   onMonthSummaryClick: (year: number, month: number) => void;
 }
@@ -84,7 +85,20 @@ const MetricCard: React.FC<MetricCardProps> = ({ title, subtitle, amount, icon, 
   );
 };
 
-const Dashboard: React.FC<DashboardProps> = ({ transactions, creditCards, savingsTransactions, bills, billPayments, onPayBill, budgets, financialGoals, allCategories, onBudgetCategoryClick, onMonthSummaryClick }) => {
+const Dashboard: React.FC<DashboardProps> = ({
+  transactions,
+  creditCards,
+  savingsTransactions,
+  bills,
+  billPayments,
+  billMonthlyAmounts = [],
+  onPayBill,
+  budgets,
+  financialGoals,
+  allCategories,
+  onBudgetCategoryClick,
+  onMonthSummaryClick,
+}) => {
   const [showFullHistory, setShowFullHistory] = useState(false);
   const [showValues, setShowValues] = useState(true);
   const { currentUser } = useUser();
@@ -232,34 +246,173 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, creditCards, saving
     }).sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
   }, [creditCards, transactions]);
 
-  const upcomingBillsToPay = useMemo(() => {
+  const { allBillsToDisplay, overdueCount } = useMemo(() => {
     const now = new Date();
     const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
     const thirtyDaysFromNow = new Date(today);
     thirtyDaysFromNow.setUTCDate(today.getUTCDate() + 30);
 
-    return bills
-      .filter(b => b.status === 'active')
-      .map(bill => {
-        const currentYear = today.getUTCFullYear();
-        const currentMonth = today.getUTCMonth();
+    const currentYear = today.getUTCFullYear();
+    const currentMonth = today.getUTCMonth();
 
-        let nextDueDate = new Date(Date.UTC(currentYear, currentMonth, bill.dueDay));
-        if (nextDueDate < today) {
-          nextDueDate.setUTCMonth(nextDueDate.getUTCMonth() + 1);
+    const items: Array<{
+      id: string;
+      bill: Bill;
+      name: string;
+      dueDate: Date;
+      isPaid: boolean;
+      status: 'overdue' | 'due_today' | 'due_soon' | 'upcoming';
+      diffDays: number;
+      amount: number;
+      hasRealAmount: boolean;
+    }> = [];
+
+    const activeBills = bills.filter((b) => b.status === 'active');
+
+    for (const bill of activeBills) {
+      // 1. Current Month check
+      const maxDaysCurrent = new Date(Date.UTC(currentYear, currentMonth + 1, 0)).getUTCDate();
+      const currentDueDate = new Date(
+        Date.UTC(currentYear, currentMonth, Math.min(bill.dueDay, maxDaysCurrent))
+      );
+
+      const isPaidCurrent = billPayments.some(
+        (p) => p.billId === bill.id && p.year === currentYear && p.month === currentMonth
+      );
+
+      const diffTimeCurrent = currentDueDate.getTime() - today.getTime();
+      const diffDaysCurrent = Math.round(diffTimeCurrent / (1000 * 60 * 60 * 24));
+
+      const monthlyOverrideCurrent = (billMonthlyAmounts || []).find(
+        (m) => m.billId === bill.id && m.year === currentYear && m.month === currentMonth
+      );
+      const amountCurrent = monthlyOverrideCurrent ? monthlyOverrideCurrent.amount : bill.estimatedAmount;
+
+      if (!isPaidCurrent) {
+        if (diffDaysCurrent < 0) {
+          // VENCIDA no mês atual!
+          items.push({
+            id: `${bill.id}_${currentYear}_${currentMonth}`,
+            bill,
+            name: bill.name,
+            dueDate: currentDueDate,
+            isPaid: false,
+            status: 'overdue',
+            diffDays: Math.abs(diffDaysCurrent),
+            amount: amountCurrent,
+            hasRealAmount: !!monthlyOverrideCurrent,
+          });
+        } else if (diffDaysCurrent === 0) {
+          // VENCE HOJE!
+          items.push({
+            id: `${bill.id}_${currentYear}_${currentMonth}`,
+            bill,
+            name: bill.name,
+            dueDate: currentDueDate,
+            isPaid: false,
+            status: 'due_today',
+            diffDays: 0,
+            amount: amountCurrent,
+            hasRealAmount: !!monthlyOverrideCurrent,
+          });
+        } else if (diffDaysCurrent <= 30) {
+          // A VENCER NOS PRÓXIMOS 30 DIAS!
+          items.push({
+            id: `${bill.id}_${currentYear}_${currentMonth}`,
+            bill,
+            name: bill.name,
+            dueDate: currentDueDate,
+            isPaid: false,
+            status: diffDaysCurrent <= 3 ? 'due_soon' : 'upcoming',
+            diffDays: diffDaysCurrent,
+            amount: amountCurrent,
+            hasRealAmount: !!monthlyOverrideCurrent,
+          });
         }
-        
-        const isPaid = billPayments.some(p => 
-            p.billId === bill.id &&
-            p.year === nextDueDate.getUTCFullYear() &&
-            p.month === nextDueDate.getUTCMonth()
-        );
+      } else {
+        // Já paga no mês atual! Calcular próximo vencimento no próximo mês
+        let nextYear = currentYear;
+        let nextMonth = currentMonth + 1;
+        if (nextMonth > 11) {
+          nextMonth = 0;
+          nextYear += 1;
+        }
 
-        return { ...bill, nextDueDate, isPaid };
-      })
-      .filter(bill => bill.nextDueDate <= thirtyDaysFromNow)
-      .sort((a,b) => a.nextDueDate.getTime() - b.nextDueDate.getTime());
-  }, [bills, billPayments]);
+        const maxDaysNext = new Date(Date.UTC(nextYear, nextMonth + 1, 0)).getUTCDate();
+        const nextDueDate = new Date(Date.UTC(nextYear, nextMonth, Math.min(bill.dueDay, maxDaysNext)));
+
+        if (nextDueDate <= thirtyDaysFromNow) {
+          const isPaidNext = billPayments.some(
+            (p) => p.billId === bill.id && p.year === nextYear && p.month === nextMonth
+          );
+          const monthlyOverrideNext = (billMonthlyAmounts || []).find(
+            (m) => m.billId === bill.id && m.year === nextYear && m.month === nextMonth
+          );
+          const amountNext = monthlyOverrideNext ? monthlyOverrideNext.amount : bill.estimatedAmount;
+
+          items.push({
+            id: `${bill.id}_${nextYear}_${nextMonth}`,
+            bill,
+            name: bill.name,
+            dueDate: nextDueDate,
+            isPaid: isPaidNext,
+            status: 'upcoming',
+            diffDays: Math.round((nextDueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)),
+            amount: amountNext,
+            hasRealAmount: !!monthlyOverrideNext,
+          });
+        }
+      }
+
+      // Também verifica se o mês anterior não foi pago (vencida com mais tempo de atraso)
+      let prevYear = currentYear;
+      let prevMonth = currentMonth - 1;
+      if (prevMonth < 0) {
+        prevMonth = 11;
+        prevYear -= 1;
+      }
+      const isPaidPrev = billPayments.some(
+        (p) => p.billId === bill.id && p.year === prevYear && p.month === prevMonth
+      );
+      if (!isPaidPrev) {
+        const maxDaysPrev = new Date(Date.UTC(prevYear, prevMonth + 1, 0)).getUTCDate();
+        const prevDueDate = new Date(Date.UTC(prevYear, prevMonth, Math.min(bill.dueDay, maxDaysPrev)));
+        const prevDiffTime = today.getTime() - prevDueDate.getTime();
+        const prevDiffDays = Math.max(1, Math.round(prevDiffTime / (1000 * 60 * 60 * 24)));
+        const monthlyOverridePrev = (billMonthlyAmounts || []).find(
+          (m) => m.billId === bill.id && m.year === prevYear && m.month === prevMonth
+        );
+        const amountPrev = monthlyOverridePrev ? monthlyOverridePrev.amount : bill.estimatedAmount;
+
+        items.push({
+          id: `${bill.id}_${prevYear}_${prevMonth}`,
+          bill,
+          name: bill.name,
+          dueDate: prevDueDate,
+          isPaid: false,
+          status: 'overdue',
+          diffDays: prevDiffDays,
+          amount: amountPrev,
+          hasRealAmount: !!monthlyOverridePrev,
+        });
+      }
+    }
+
+    const overdueCount = items.filter((i) => i.status === 'overdue').length;
+
+    const sorted = items.sort((a, b) => {
+      const priority = { overdue: 0, due_today: 1, due_soon: 2, upcoming: 3 };
+      if (priority[a.status] !== priority[b.status]) {
+        return priority[a.status] - priority[b.status];
+      }
+      if (a.status === 'overdue') {
+        return b.diffDays - a.diffDays;
+      }
+      return a.dueDate.getTime() - b.dueDate.getTime();
+    });
+
+    return { allBillsToDisplay: sorted, overdueCount };
+  }, [bills, billPayments, billMonthlyAmounts]);
   
   const budgetSummary = useMemo(() => {
     const now = new Date();
@@ -563,40 +716,108 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, creditCards, saving
               </div>
           </Card>
 
-          <Card title="Contas a Vencer" icon="fa-file-invoice-dollar" className="lg:col-span-1">
+          <Card
+            title="Contas a Pagar"
+            icon="fa-file-invoice-dollar"
+            className="lg:col-span-1"
+            headerAction={
+              overdueCount > 0 ? (
+                <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse flex items-center gap-1.5 shadow-sm shadow-rose-900/30">
+                  <i className="fa-solid fa-triangle-exclamation text-[10px]"></i>
+                  <span>{overdueCount} vencida{overdueCount > 1 ? 's' : ''}</span>
+                </span>
+              ) : undefined
+            }
+          >
               <div className="space-y-3 max-h-96 overflow-y-auto pr-1 custom-scrollbar">
-                  {upcomingBillsToPay.map(bill => (
-                      <div key={bill.id} className="flex justify-between items-center bg-slate-800/50 p-3.5 rounded-xl border border-white/[0.05] hover:border-blue-500/30 transition-colors">
+                  {allBillsToDisplay.map((item) => (
+                      <div
+                        key={item.id}
+                        className={`flex justify-between items-center p-3.5 rounded-xl border transition-colors ${
+                          item.status === 'overdue'
+                            ? 'bg-rose-950/20 border-rose-500/40 hover:border-rose-500/60'
+                            : item.status === 'due_today'
+                            ? 'bg-amber-950/20 border-amber-500/40 hover:border-amber-500/60'
+                            : 'bg-slate-800/50 border-white/[0.05] hover:border-blue-500/30'
+                        }`}
+                      >
                           <div className="flex items-center gap-3 flex-1 min-w-0">
-                              <div className="w-9 h-9 rounded-xl bg-blue-500/15 border border-blue-500/25 text-blue-400 flex items-center justify-center text-sm flex-shrink-0">
-                                <i className="fa-solid fa-receipt"></i>
+                              <div
+                                className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm flex-shrink-0 border ${
+                                  item.status === 'overdue'
+                                    ? 'bg-rose-500/20 border-rose-500/40 text-rose-400'
+                                    : item.status === 'due_today'
+                                    ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                                    : 'bg-blue-500/15 border-blue-500/25 text-blue-400'
+                                }`}
+                              >
+                                <i className={`fa-solid ${
+                                  item.status === 'overdue'
+                                    ? 'fa-triangle-exclamation animate-pulse'
+                                    : item.status === 'due_today'
+                                    ? 'fa-bolt animate-pulse'
+                                    : 'fa-receipt'
+                                }`}></i>
                               </div>
                               <div className="min-w-0">
-                                  <p className="font-semibold text-sm text-slate-200 truncate">{bill.name}</p>
-                                  <p className="text-xs text-slate-400">Vence: {bill.nextDueDate.toLocaleDateString('pt-BR', { timeZone: 'UTC' })}</p>
+                                  <p className="font-semibold text-sm text-slate-200 truncate">{item.name}</p>
+                                  {item.status === 'overdue' ? (
+                                    <p className="text-xs text-rose-400 font-bold flex items-center gap-1">
+                                      <span>Venceu há {item.diffDays} dia(s)</span>
+                                      <span className="text-rose-500/60">•</span>
+                                      <span className="font-normal text-rose-300/80">{item.dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'UTC' })}</span>
+                                    </p>
+                                  ) : item.status === 'due_today' ? (
+                                    <p className="text-xs text-amber-300 font-bold">Vence Hoje!</p>
+                                  ) : (
+                                    <p className="text-xs text-slate-400">
+                                      Vence: {item.dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'UTC' })}
+                                      {item.status === 'due_soon' && (
+                                        <span className="text-amber-400 font-medium ml-1">(em {item.diffDays} dias)</span>
+                                      )}
+                                    </p>
+                                  )}
                               </div>
                           </div>
                           <div className="flex items-center gap-3 ml-2 flex-shrink-0">
-                             <p className="font-extrabold text-slate-200 tabular-nums text-sm">{formatCurrency(bill.estimatedAmount)}</p>
-                             {bill.isPaid ? (
+                             <div className="text-right">
+                               <p className={`font-extrabold tabular-nums text-sm ${
+                                 item.status === 'overdue' ? 'text-rose-300' : 'text-slate-200'
+                               }`}>
+                                 {formatCurrency(item.amount)}
+                               </p>
+                               {item.hasRealAmount && (
+                                 <span className="text-[9px] text-blue-400 block font-semibold leading-none">Real</span>
+                               )}
+                             </div>
+                             {item.isPaid ? (
                                 <span className="px-2.5 py-1 bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-bold">
                                     Pago
                                 </span>
                              ) : (
-                                <button onClick={() => onPayBill(bill, bill.nextDueDate)} className="px-3 py-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg transition-all text-xs font-semibold shadow-md shadow-blue-600/20">
+                                <button
+                                  onClick={() => onPayBill(item.bill, item.dueDate, item.amount)}
+                                  className={`px-3 py-1 text-white rounded-lg transition-all text-xs font-semibold shadow-md ${
+                                    item.status === 'overdue'
+                                      ? 'bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 shadow-rose-600/25'
+                                      : item.status === 'due_today'
+                                      ? 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 shadow-amber-500/25'
+                                      : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-blue-600/20'
+                                  }`}
+                                >
                                     Pagar
                                 </button>
                              )}
                           </div>
                       </div>
                   ))}
-                  {upcomingBillsToPay.length === 0 && (
+                  {allBillsToDisplay.length === 0 && (
                       <div className="flex flex-col items-center justify-center h-64 text-center">
                          <div className="w-12 h-12 rounded-2xl bg-slate-800/80 flex items-center justify-center text-slate-600 mb-2">
                            <i className="fa-solid fa-circle-check text-xl"></i>
                          </div>
                          <p className="text-slate-400 text-sm font-medium">Tudo em dia!</p>
-                         <p className="text-slate-500 text-xs mt-0.5">Nenhuma conta a vencer nos próximos 30 dias.</p>
+                         <p className="text-slate-500 text-xs mt-0.5">Nenhuma conta pendente ou vencida nos próximos 30 dias.</p>
                       </div>
                   )}
               </div>

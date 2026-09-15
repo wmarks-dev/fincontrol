@@ -252,7 +252,7 @@ const AppContent: React.FC = () => {
 
   const renderView = () => {
     switch(activeView) {
-      case 'dashboard': return <Dashboard transactions={data.transactions} creditCards={data.creditCards} savingsTransactions={data.savingsTransactions} bills={data.bills} billPayments={data.billPayments} budgets={data.budgets} financialGoals={data.financialGoals} onPayBill={handlePayBill} allCategories={data.allCategories} onBudgetCategoryClick={handleDashboardCategoryClick} onMonthSummaryClick={handleMonthSummaryClick} />;
+      case 'dashboard': return <Dashboard transactions={data.transactions} creditCards={data.creditCards} savingsTransactions={data.savingsTransactions} bills={data.bills} billPayments={data.billPayments} billMonthlyAmounts={data.billMonthlyAmounts} budgets={data.budgets} financialGoals={data.financialGoals} onPayBill={handlePayBill} allCategories={data.allCategories} onBudgetCategoryClick={handleDashboardCategoryClick} onMonthSummaryClick={handleMonthSummaryClick} />;
       case 'reports': return <Reports transactions={data.transactions} creditCards={data.creditCards} allCategories={data.allCategories} onCategoryClick={handleCategoryReportClick} />;
       case 'transactions': return <TransactionList transactions={data.transactions} onEdit={handleEditTransaction} onDelete={handleDeleteTransaction} allCategories={data.allCategories} initialFilters={transactionListFilters} onFiltersApplied={() => setTransactionListFilters(null)} />;
       case 'cards': return <CardsManagement creditCards={data.creditCards} onAddCard={data.addCreditCard} onUpdateCard={data.updateCreditCard} transactions={data.transactions} onDeleteCard={handleDeleteCreditCard} allCategories={data.allCategories} />;
@@ -299,7 +299,7 @@ const AppContent: React.FC = () => {
           onUpdateCategory={(cat) => setAddCategoryModalProps({isOpen: true, categoryToEdit: cat})}
           onDeleteCategory={handleDeleteCategory}
         />;
-      default: return <Dashboard transactions={data.transactions} creditCards={data.creditCards} savingsTransactions={data.savingsTransactions} bills={data.bills} billPayments={data.billPayments} budgets={data.budgets} financialGoals={data.financialGoals} onPayBill={handlePayBill} allCategories={data.allCategories} onBudgetCategoryClick={handleDashboardCategoryClick} onMonthSummaryClick={handleMonthSummaryClick} />;
+      default: return <Dashboard transactions={data.transactions} creditCards={data.creditCards} savingsTransactions={data.savingsTransactions} bills={data.bills} billPayments={data.billPayments} billMonthlyAmounts={data.billMonthlyAmounts} budgets={data.budgets} financialGoals={data.financialGoals} onPayBill={handlePayBill} allCategories={data.allCategories} onBudgetCategoryClick={handleDashboardCategoryClick} onMonthSummaryClick={handleMonthSummaryClick} />;
     }
   }
   
