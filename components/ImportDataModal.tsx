@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Transaction, CreditCard, Category, TransactionType, PaymentMethod } from '../types';
-import { parseOFX, parseCSV, downloadFinControlTemplate, ParsedImportItem } from '../utils/importParsers';
+import { parseOFX, parseCSV, parseXLSX, downloadFinControlTemplate, ParsedImportItem } from '../utils/importParsers';
 import { suggestCategory } from '../utils/smartCategorizer';
 import { checkDuplicate } from '../utils/duplicateDetector';
 
@@ -37,7 +37,7 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
 }) => {
   const [step, setStep] = useState<'upload' | 'preview'>('upload');
   const [fileName, setFileName] = useState<string>('');
-  const [fileFormat, setFileFormat] = useState<'OFX' | 'CSV'>('OFX');
+  const [fileFormat, setFileFormat] = useState<'OFX' | 'CSV' | 'XLSX'>('OFX');
 
   // Destination settings
   const [destinationType, setDestinationType] = useState<'account' | 'card'>('account');
@@ -77,25 +77,31 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
   const handleFileProcess = (file: File) => {
     setErrorMessage(null);
     const ext = file.name.split('.').pop()?.toLowerCase();
+    const isExcel = ext === 'xlsx' || ext === 'xls';
 
-    if (ext !== 'ofx' && ext !== 'csv' && ext !== 'txt') {
-      setErrorMessage('Por favor, selecione um arquivo válido no formato .ofx ou .csv.');
+    if (ext !== 'ofx' && ext !== 'csv' && ext !== 'txt' && !isExcel) {
+      setErrorMessage('Por favor, selecione um arquivo válido no formato .ofx, .csv ou .xlsx.');
       return;
     }
 
     setFileName(file.name);
-    setFileFormat(ext === 'ofx' ? 'OFX' : 'CSV');
+    setFileFormat(ext === 'ofx' ? 'OFX' : isExcel ? 'XLSX' : 'CSV');
 
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const text = e.target?.result as string;
         let parsed: ParsedImportItem[] = [];
 
-        if (ext === 'ofx') {
-          parsed = parseOFX(text);
+        if (isExcel) {
+          const buffer = e.target?.result as ArrayBuffer;
+          parsed = parseXLSX(buffer);
         } else {
-          parsed = parseCSV(text);
+          const text = e.target?.result as string;
+          if (ext === 'ofx') {
+            parsed = parseOFX(text);
+          } else {
+            parsed = parseCSV(text);
+          }
         }
 
         if (!parsed || parsed.length === 0) {
@@ -104,7 +110,7 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
 
         // Augment with smart categorizer & duplicate detector
         const itemsWithState: ImportItemWithState[] = parsed.map((item) => {
-          // If CSV provided a category name, try to match it
+          // If file provided a category name, try to match it
           let catId = '';
           if (item.category) {
             const foundCat = allCategories.find(
@@ -139,7 +145,11 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
       }
     };
 
-    reader.readAsText(file);
+    if (isExcel) {
+      reader.readAsArrayBuffer(file);
+    } else {
+      reader.readAsText(file);
+    }
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -260,8 +270,8 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
               </h2>
               <p className="text-xs text-slate-400">
                 {step === 'upload'
-                  ? 'Selecione um arquivo OFX ou planilha CSV para importar'
-                  : `Pré-visualização: ${fileName} (${items.length} itens)`}
+                  ? 'Selecione um arquivo OFX, CSV ou planilha XLSX (Itaú) para importar'
+                  : `Pré-visualização: ${fileName} (${fileFormat} • ${items.length} itens)`}
               </p>
             </div>
           </div>
@@ -411,7 +421,7 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
                       handleFileProcess(e.target.files[0]);
                     }
                   }}
-                  accept=".ofx,.csv,.txt"
+                  accept=".ofx,.csv,.xlsx,.xls,.txt"
                   className="hidden"
                 />
 
@@ -428,8 +438,8 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
                     Arraste seu arquivo aqui ou clique para selecionar
                   </h3>
                   <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto">
-                    Compatível com extratos bancários <strong className="text-slate-200">.OFX</strong> (Nubank, Itaú,
-                    Bradesco, Santander, Inter, etc.) e planilhas <strong className="text-slate-200">.CSV</strong>.
+                    Compatível com extratos <strong className="text-slate-200">.OFX</strong> (Nubank, Itaú,
+                    Bradesco, Santander, Inter, etc.), planilhas <strong className="text-slate-200">.XLSX / .XLS</strong> (faturas e extratos Itaú) e <strong className="text-slate-200">.CSV</strong>.
                   </p>
                   <div className="inline-flex items-center gap-2 px-3 py-1 mt-4 rounded-full bg-slate-800 border border-white/10 text-xs text-slate-300">
                     <i className="fa-solid fa-shield-check text-emerald-400"></i>
@@ -461,7 +471,20 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
                 <div className="bg-slate-800/60 border border-white/[0.06] p-3 rounded-xl">
                   <span className="text-[11px] text-slate-400 block font-medium">Total no Arquivo</span>
-                  <span className="text-lg font-bold text-white">{items.length} itens</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg font-bold text-white">{items.length} itens</span>
+                    <span
+                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase border ${
+                        fileFormat === 'XLSX'
+                          ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                          : fileFormat === 'OFX'
+                          ? 'bg-purple-500/20 text-purple-400 border-purple-500/30'
+                          : 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                      }`}
+                    >
+                      {fileFormat}
+                    </span>
+                  </div>
                 </div>
                 <div className="bg-slate-800/60 border border-white/[0.06] p-3 rounded-xl">
                   <span className="text-[11px] text-slate-400 block font-medium">Selecionados</span>

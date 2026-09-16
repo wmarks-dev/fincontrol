@@ -1,3 +1,4 @@
+import * as XLSX from 'xlsx';
 import { TransactionType } from '../types';
 
 export interface ParsedImportItem {
@@ -10,6 +11,58 @@ export interface ParsedImportItem {
   fitId?: string;
   memo?: string;
   rawText?: string;
+}
+
+/**
+ * Helper to parse date string (DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD).
+ */
+export function parseDateStr(str: string): string {
+  const clean = str.trim().replace(/[.]/g, '/').replace(/[-]/g, '/');
+  const parts = clean.split('/');
+
+  if (parts.length === 3) {
+    // If first part is 4 digits -> YYYY/MM/DD
+    if (parts[0].length === 4) {
+      const y = parts[0];
+      const m = parts[1].padStart(2, '0');
+      const d = parts[2].padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+    // If third part is 4 digits -> DD/MM/YYYY
+    if (parts[2].length === 4) {
+      const d = parts[0].padStart(2, '0');
+      const m = parts[1].padStart(2, '0');
+      const y = parts[2];
+      return `${y}-${m}-${d}`;
+    }
+  }
+  return new Date().toISOString().split('T')[0];
+}
+
+/**
+ * Helper to parse currency/number string (handles R$, commas, dots, negatives, and parentheses).
+ */
+export function parseAmountStr(str: string): { amount: number; isNegative: boolean } {
+  let clean = str.replace(/R\$/gi, '').replace(/\s+/g, '').trim();
+  let isNegative = false;
+
+  if (clean.startsWith('-') || clean.endsWith('-') || (clean.startsWith('(') && clean.endsWith(')'))) {
+    isNegative = true;
+    clean = clean.replace(/[-()]/g, '');
+  }
+
+  // Brazilian format check: "1.250,50" -> remove dot, replace comma with dot
+  if (clean.includes('.') && clean.includes(',')) {
+    clean = clean.replace(/\./g, '').replace(',', '.');
+  } else if (clean.includes(',')) {
+    clean = clean.replace(',', '.');
+  }
+
+  const num = parseFloat(clean);
+  return {
+    amount: isNaN(num) ? 0 : Math.abs(num),
+    isNegative,
+  };
 }
 
 /**
@@ -139,6 +192,8 @@ export function parseCSV(content: string): ParsedImportItem[] {
     } else if (
       h.includes('descri') ||
       h.includes('hist') ||
+      h.includes('lançamento') ||
+      h.includes('lancamento') ||
       h.includes('memo') ||
       h.includes('titulo') ||
       h.includes('estabeleci') ||
@@ -158,54 +213,6 @@ export function parseCSV(content: string): ParsedImportItem[] {
   if (dateIdx === -1) dateIdx = 0;
   if (descIdx === -1) descIdx = 1;
   if (amountIdx === -1) amountIdx = Math.min(2, headers.length - 1);
-
-  // Helper to parse date string (DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD)
-  const parseDateStr = (str: string): string => {
-    const clean = str.trim().replace(/[.]/g, '/').replace(/[-]/g, '/');
-    const parts = clean.split('/');
-
-    if (parts.length === 3) {
-      // If first part is 4 digits -> YYYY/MM/DD
-      if (parts[0].length === 4) {
-        const y = parts[0];
-        const m = parts[1].padStart(2, '0');
-        const d = parts[2].padStart(2, '0');
-        return `${y}-${m}-${d}`;
-      }
-      // If third part is 4 digits -> DD/MM/YYYY
-      if (parts[2].length === 4) {
-        const d = parts[0].padStart(2, '0');
-        const m = parts[1].padStart(2, '0');
-        const y = parts[2];
-        return `${y}-${m}-${d}`;
-      }
-    }
-    return new Date().toISOString().split('T')[0];
-  };
-
-  // Helper to parse currency/number
-  const parseAmountStr = (str: string): { amount: number; isNegative: boolean } => {
-    let clean = str.replace(/R\$/gi, '').replace(/\s+/g, '').trim();
-    let isNegative = false;
-
-    if (clean.startsWith('-') || clean.endsWith('-') || (clean.startsWith('(') && clean.endsWith(')'))) {
-      isNegative = true;
-      clean = clean.replace(/[-()]/g, '');
-    }
-
-    // Brazilian format check: "1.250,50" -> remove dot, replace comma with dot
-    if (clean.includes('.') && clean.includes(',')) {
-      clean = clean.replace(/\./g, '').replace(',', '.');
-    } else if (clean.includes(',')) {
-      clean = clean.replace(',', '.');
-    }
-
-    const num = parseFloat(clean);
-    return {
-      amount: isNaN(num) ? 0 : Math.abs(num),
-      isNegative,
-    };
-  };
 
   // Process rows
   for (let i = 1; i < lines.length; i++) {
@@ -243,6 +250,192 @@ export function parseCSV(content: string): ParsedImportItem[] {
       type,
       category: rawCat?.trim(),
       rawText: lines[i],
+    });
+  }
+
+  return items;
+}
+
+/**
+ * Parses an Excel spreadsheet (.xlsx or .xls) - specifically optimized for Banco Itaú and Brazilian card statements.
+ */
+export function parseXLSX(buffer: ArrayBuffer): ParsedImportItem[] {
+  const items: ParsedImportItem[] = [];
+
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+  if (!workbook.SheetNames || workbook.SheetNames.length === 0) return items;
+
+  // Read the first active sheet
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const rawRows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+  if (!rawRows || rawRows.length < 2) return items;
+
+  const norm = (val: any): string => {
+    return String(val || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim();
+  };
+
+  // Find header row index
+  let headerRowIdx = -1;
+  let dateIdx = -1;
+  let descIdx = -1;
+  let amountIdx = -1;
+  let typeIdx = -1;
+  let catIdx = -1;
+
+  for (let r = 0; r < Math.min(25, rawRows.length); r++) {
+    const row = rawRows[r];
+    if (!Array.isArray(row)) continue;
+
+    let dIdx = -1;
+    let sIdx = -1;
+    let aIdx = -1;
+    let tIdx = -1;
+    let cIdx = -1;
+
+    for (let c = 0; c < row.length; c++) {
+      const cell = norm(row[c]);
+      if (cell.includes('data') || cell.includes('date') || cell === 'dt') {
+        if (dIdx === -1) dIdx = c;
+      } else if (
+        cell.includes('descri') ||
+        cell.includes('hist') ||
+        cell.includes('lançamento') ||
+        cell.includes('lancamento') ||
+        cell.includes('memo') ||
+        cell.includes('estabeleci') ||
+        cell.includes('titulo') ||
+        cell.includes('transacao') ||
+        cell === 'nome'
+      ) {
+        if (sIdx === -1) sIdx = c;
+      } else if (
+        cell.includes('valor') ||
+        cell.includes('amount') ||
+        cell.includes('total') ||
+        cell.includes('quantia') ||
+        cell.includes('r$')
+      ) {
+        if (aIdx === -1) aIdx = c;
+      } else if (cell.includes('tipo') || cell.includes('type')) {
+        if (tIdx === -1) tIdx = c;
+      } else if (cell.includes('categoria') || cell.includes('category')) {
+        if (cIdx === -1) cIdx = c;
+      }
+    }
+
+    if (dIdx !== -1 && (sIdx !== -1 || aIdx !== -1)) {
+      headerRowIdx = r;
+      dateIdx = dIdx;
+      descIdx = sIdx !== -1 ? sIdx : (dIdx === 0 ? 1 : 0);
+      amountIdx = aIdx !== -1 ? aIdx : (descIdx === 1 ? 2 : 1);
+      typeIdx = tIdx;
+      catIdx = cIdx;
+      break;
+    }
+  }
+
+  // Fallback
+  if (headerRowIdx === -1) {
+    headerRowIdx = 0;
+    dateIdx = 0;
+    descIdx = 1;
+    amountIdx = 2;
+  }
+
+  // Date formatter for Excel cells
+  const formatCellDate = (val: any): string => {
+    if (val instanceof Date && !isNaN(val.getTime())) {
+      const y = val.getUTCFullYear();
+      const m = String(val.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(val.getUTCDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+
+    if (typeof val === 'number') {
+      try {
+        const parsedDate = XLSX.SSF.parse_date_code(val);
+        if (parsedDate) {
+          const y = parsedDate.y;
+          const m = String(parsedDate.m).padStart(2, '0');
+          const d = String(parsedDate.d).padStart(2, '0');
+          return `${y}-${m}-${d}`;
+        }
+      } catch {}
+    }
+
+    return parseDateStr(String(val || ''));
+  };
+
+  // Amount parser for Excel cells
+  const parseCellAmount = (val: any): { amount: number; isNegative: boolean } => {
+    if (typeof val === 'number') {
+      return {
+        amount: Math.abs(val),
+        isNegative: val < 0,
+      };
+    }
+    return parseAmountStr(String(val || ''));
+  };
+
+  const isSummaryRow = (desc: string): boolean => {
+    const d = norm(desc);
+    return (
+      d.includes('total da fatura') ||
+      d.includes('saldo anterior') ||
+      d.includes('total de compras') ||
+      d.includes('subtotal') ||
+      d.includes('pagamento de fatura') ||
+      (d.includes('encargos') && d.includes('totais'))
+    );
+  };
+
+  for (let r = headerRowIdx + 1; r < rawRows.length; r++) {
+    const row = rawRows[r];
+    if (!Array.isArray(row) || row.length === 0) continue;
+
+    const rawDate = row[dateIdx];
+    const rawDesc = String(row[descIdx] || '').trim();
+    const rawAmount = row[amountIdx];
+    const rawType = typeIdx !== -1 ? norm(row[typeIdx]) : '';
+    const rawCat = catIdx !== -1 ? String(row[catIdx] || '').trim() : undefined;
+
+    if (!rawDate && !rawAmount) continue;
+    if (!rawDesc || isSummaryRow(rawDesc)) continue;
+
+    const date = formatCellDate(rawDate);
+    const { amount, isNegative } = parseCellAmount(rawAmount);
+    if (amount === 0 || isNaN(amount)) continue;
+
+    // Type detection:
+    // In credit card exports, refunds/reversals/credits are marked with - or labeled as credito/estorno
+    let type = TransactionType.EXPENSE;
+    if (rawType) {
+      if (rawType.includes('receita') || rawType.includes('cred') || rawType.includes('entrada') || rawType.includes('income')) {
+        type = TransactionType.INCOME;
+      } else {
+        type = TransactionType.EXPENSE;
+      }
+    } else {
+      const dNorm = norm(rawDesc);
+      if (dNorm.includes('estorno') || dNorm.includes('credito') || dNorm.includes('reembolso')) {
+        type = TransactionType.INCOME;
+      } else {
+        type = isNegative ? TransactionType.INCOME : TransactionType.EXPENSE;
+      }
+    }
+
+    items.push({
+      id: `${date}_${amount}_${Math.random().toString(36).substring(2, 7)}`,
+      date,
+      description: rawDesc,
+      amount,
+      type,
+      category: rawCat,
+      rawText: JSON.stringify(row),
     });
   }
 
