@@ -11,6 +11,106 @@ export interface ParsedImportItem {
   fitId?: string;
   memo?: string;
   rawText?: string;
+  installmentNumber?: number;
+  totalInstallments?: number;
+  installmentStr?: string; // e.g. "2/6"
+}
+
+export interface InstallmentInfo {
+  cleanDesc: string;
+  standardizedDesc: string;
+  current?: number;
+  total?: number;
+  installmentStr?: string; // e.g. "2/6"
+}
+
+/**
+ * Extracts installment information from description or an explicit column.
+ * Handles Brazilian bank/card formats:
+ * - "MERCADOLIVRE 02/06" -> 2/6
+ * - "MAGALU (01/10)" -> 1/10
+ * - "LOJA - PARC 03/05" -> 3/5
+ * - "PARC 02/06 LOJA" -> 2/6
+ * - "PARC 02 DE 06" -> 2/6
+ * - "02/06 LOJA SAO PAULO" -> 2/6
+ * - Explicit column containing "02/06", "2/6", "2 de 6", or "2"
+ */
+export function extractInstallmentInfo(description: string, rawParcCol?: string): InstallmentInfo {
+  let cleanDesc = (description || '').trim();
+  let current: number | undefined;
+  let total: number | undefined;
+  let installmentStr: string | undefined;
+
+  // 1. Check explicit installment column if present (e.g. from Excel/CSV 'parcela')
+  if (rawParcCol && String(rawParcCol).trim()) {
+    const colStr = String(rawParcCol).trim();
+    // '02/06', '2/6', '2 de 6'
+    const colMatch = colStr.match(/(\d{1,2})\s*(?:\/|de)\s*(\d{1,2})/i);
+    if (colMatch) {
+      const c = parseInt(colMatch[1], 10);
+      const t = parseInt(colMatch[2], 10);
+      if (t >= 2 && t <= 72 && c >= 1 && c <= t) {
+        current = c;
+        total = t;
+        installmentStr = `${c}/${t}`;
+      }
+    } else {
+      const singleNum = parseInt(colStr, 10);
+      if (!isNaN(singleNum) && singleNum >= 1 && singleNum <= 72) {
+        current = singleNum;
+        installmentStr = String(singleNum);
+      }
+    }
+  }
+
+  // 2. Check description for installment patterns if not fully resolved
+  if (!total) {
+    // Regex matching: '02/06', '2/6', '(02/06)', '[02/06]', 'PARC 02/06', 'PARC. 02/06', 'PARC 02 DE 06', '- 02/06'
+    const descRegex = /(?:(?:parc(?:ela)?\.?\s*)|(?:-\s*)|(?:\(\s*)|(?:\[\s*))?(\d{1,2})\s*(?:\/|de)\s*(\d{1,2})(?:\s*\)|\s*\])?/gi;
+    const matches = [...cleanDesc.matchAll(descRegex)];
+
+    if (matches.length > 0) {
+      // Find best match: prefer ones with explicit keyword prefix or nearest to the end
+      let bestMatch = matches[matches.length - 1];
+      for (const m of matches) {
+        if (/parc|de|\(|\-|\//i.test(m[0])) {
+          bestMatch = m;
+        }
+      }
+
+      const c = parseInt(bestMatch[1], 10);
+      const t = parseInt(bestMatch[2], 10);
+
+      // Validate: total must be between 2 and 72, and current <= total
+      const isValidInstallment = t >= 2 && t <= 72 && c >= 1 && c <= t;
+
+      if (isValidInstallment) {
+        current = c;
+        total = t;
+        installmentStr = `${c}/${t}`;
+        // Clean description by removing the installment fragment
+        cleanDesc = cleanDesc
+          .replace(bestMatch[0], '')
+          .replace(/\s{2,}/g, ' ')
+          .replace(/^[\s\-–—/]+|[\s\-–—/]+$/g, '')
+          .trim();
+      }
+    }
+  }
+
+  if (!cleanDesc) cleanDesc = description;
+
+  const standardizedDesc = installmentStr
+    ? `${cleanDesc} ${installmentStr.includes('/') ? installmentStr : `${installmentStr}x`}`
+    : cleanDesc;
+
+  return {
+    cleanDesc,
+    standardizedDesc,
+    current,
+    total,
+    installmentStr,
+  };
 }
 
 /**
@@ -113,15 +213,19 @@ export function parseOFX(content: string): ParsedImportItem[] {
 
     // Clean description: prefer MEMO, fallback to NAME, or generic
     let description = (memo || name || trntype || 'Transação').replace(/\s+/g, ' ').trim();
+    const inst = extractInstallmentInfo(description);
 
     items.push({
       id: fitid || `${dateStr}_${amount}_${Math.random().toString(36).substring(2, 7)}`,
       date: dateStr,
-      description,
+      description: inst.standardizedDesc,
       amount,
       type,
       fitId: fitid,
       memo: memo || name,
+      installmentNumber: inst.current,
+      totalInstallments: inst.total,
+      installmentStr: inst.installmentStr,
       rawText: block.trim(),
     });
   }
@@ -185,6 +289,7 @@ export function parseCSV(content: string): ParsedImportItem[] {
   let amountIdx = -1;
   let typeIdx = -1;
   let catIdx = -1;
+  let parcIdx = -1;
 
   headers.forEach((h, idx) => {
     if (h.includes('data') || h.includes('date') || h.includes('dt')) {
@@ -206,6 +311,14 @@ export function parseCSV(content: string): ParsedImportItem[] {
       if (typeIdx === -1) typeIdx = idx;
     } else if (h.includes('categoria') || h.includes('category')) {
       if (catIdx === -1) catIdx = idx;
+    } else if (
+      h.includes('parcela') ||
+      h.includes('parc') ||
+      h.includes('prestacao') ||
+      h.includes('prestac') ||
+      h === 'pc'
+    ) {
+      if (parcIdx === -1) parcIdx = idx;
     }
   });
 
@@ -224,6 +337,7 @@ export function parseCSV(content: string): ParsedImportItem[] {
     const rawAmount = cols[amountIdx] || '';
     const rawType = typeIdx !== -1 ? (cols[typeIdx] || '').toLowerCase() : '';
     const rawCat = catIdx !== -1 ? cols[catIdx] : undefined;
+    const rawParc = parcIdx !== -1 ? cols[parcIdx] || '' : '';
 
     if (!rawDate && !rawAmount) continue;
 
@@ -242,13 +356,18 @@ export function parseCSV(content: string): ParsedImportItem[] {
       type = isNegative ? TransactionType.EXPENSE : TransactionType.INCOME;
     }
 
+    const inst = extractInstallmentInfo(rawDesc.trim() || 'Transação sem descrição', rawParc);
+
     items.push({
       id: `${date}_${amount}_${Math.random().toString(36).substring(2, 7)}`,
       date,
-      description: rawDesc.trim() || 'Transação sem descrição',
+      description: inst.standardizedDesc,
       amount,
       type,
       category: rawCat?.trim(),
+      installmentNumber: inst.current,
+      totalInstallments: inst.total,
+      installmentStr: inst.installmentStr,
       rawText: lines[i],
     });
   }
@@ -285,6 +404,7 @@ export function parseXLSX(buffer: ArrayBuffer): ParsedImportItem[] {
   let amountIdx = -1;
   let typeIdx = -1;
   let catIdx = -1;
+  let parcIdx = -1;
 
   for (let r = 0; r < Math.min(25, rawRows.length); r++) {
     const row = rawRows[r];
@@ -295,6 +415,7 @@ export function parseXLSX(buffer: ArrayBuffer): ParsedImportItem[] {
     let aIdx = -1;
     let tIdx = -1;
     let cIdx = -1;
+    let pIdx = -1;
 
     for (let c = 0; c < row.length; c++) {
       const cell = norm(row[c]);
@@ -324,6 +445,14 @@ export function parseXLSX(buffer: ArrayBuffer): ParsedImportItem[] {
         if (tIdx === -1) tIdx = c;
       } else if (cell.includes('categoria') || cell.includes('category')) {
         if (cIdx === -1) cIdx = c;
+      } else if (
+        cell.includes('parcela') ||
+        cell.includes('parc') ||
+        cell.includes('prestacao') ||
+        cell.includes('prestac') ||
+        cell === 'pc'
+      ) {
+        if (pIdx === -1) pIdx = c;
       }
     }
 
@@ -334,6 +463,7 @@ export function parseXLSX(buffer: ArrayBuffer): ParsedImportItem[] {
       amountIdx = aIdx !== -1 ? aIdx : (descIdx === 1 ? 2 : 1);
       typeIdx = tIdx;
       catIdx = cIdx;
+      parcIdx = pIdx;
       break;
     }
   }
@@ -402,6 +532,7 @@ export function parseXLSX(buffer: ArrayBuffer): ParsedImportItem[] {
     const rawAmount = row[amountIdx];
     const rawType = typeIdx !== -1 ? norm(row[typeIdx]) : '';
     const rawCat = catIdx !== -1 ? String(row[catIdx] || '').trim() : undefined;
+    const rawParc = parcIdx !== -1 ? String(row[parcIdx] || '').trim() : '';
 
     if (!rawDate && !rawAmount) continue;
     if (!rawDesc || isSummaryRow(rawDesc)) continue;
@@ -428,13 +559,18 @@ export function parseXLSX(buffer: ArrayBuffer): ParsedImportItem[] {
       }
     }
 
+    const inst = extractInstallmentInfo(rawDesc, rawParc);
+
     items.push({
       id: `${date}_${amount}_${Math.random().toString(36).substring(2, 7)}`,
       date,
-      description: rawDesc,
+      description: inst.standardizedDesc,
       amount,
       type,
       category: rawCat,
+      installmentNumber: inst.current,
+      totalInstallments: inst.total,
+      installmentStr: inst.installmentStr,
       rawText: JSON.stringify(row),
     });
   }

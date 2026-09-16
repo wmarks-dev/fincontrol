@@ -43,11 +43,12 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
   const [destinationType, setDestinationType] = useState<'account' | 'card'>('account');
   const [selectedCardId, setSelectedCardId] = useState<string>('');
   const [accountPaymentMethod, setAccountPaymentMethod] = useState<PaymentMethod>(PaymentMethod.DEBIT);
+  const [projectFutureInstallments, setProjectFutureInstallments] = useState(false);
 
   // Parsed items
   const [items, setItems] = useState<ImportItemWithState[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'all' | 'EXPENSE' | 'INCOME'>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'EXPENSE' | 'INCOME' | 'INSTALLMENT'>('all');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -61,6 +62,7 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
       setErrorMessage(null);
       setSearchQuery('');
       setTypeFilter('all');
+      setProjectFutureInstallments(false);
 
       if (initialCreditCardId && creditCards.some((c) => c.id === initialCreditCardId)) {
         setDestinationType('card');
@@ -195,13 +197,19 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
   // Filtered preview items
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
-      if (typeFilter !== 'all' && item.type !== typeFilter) return false;
+      if (typeFilter === 'INSTALLMENT') {
+        if (!item.installmentStr) return false;
+      } else if (typeFilter !== 'all' && item.type !== typeFilter) {
+        return false;
+      }
+
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         return (
           item.description.toLowerCase().includes(q) ||
           item.amount.toString().includes(q) ||
-          item.date.includes(q)
+          item.date.includes(q) ||
+          (item.installmentStr && item.installmentStr.toLowerCase().includes(q))
         );
       }
       return true;
@@ -211,6 +219,7 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
   // Totals of selected items
   const selectedCount = items.filter((i) => i.selected).length;
   const duplicateCount = items.filter((i) => i.isDuplicate).length;
+  const installmentCount = items.filter((i) => !!i.installmentStr).length;
   const selectedTotal = items
     .filter((i) => i.selected)
     .reduce((acc, curr) => acc + (curr.type === TransactionType.INCOME ? curr.amount : -curr.amount), 0);
@@ -227,9 +236,15 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
       setIsSubmitting(true);
       setErrorMessage(null);
 
-      const toSave: Omit<Transaction, 'id'>[] = selectedItems.map((item) => {
-        const isCard = destinationType === 'card';
-        return {
+      const toSave: Omit<Transaction, 'id'>[] = [];
+      const isCard = destinationType === 'card';
+
+      for (const item of selectedItems) {
+        const sharedInstallmentId = item.installmentStr
+          ? `inst_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+          : undefined;
+
+        toSave.push({
           description: item.description,
           amount: item.amount,
           date: item.date,
@@ -241,9 +256,40 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
             ? PaymentMethod.CASH
             : accountPaymentMethod,
           creditCardId: isCard ? selectedCardId : null,
+          installmentId: sharedInstallmentId,
           isPaid: isCard ? false : true,
-        };
-      });
+        });
+
+        // If card destination, user opted to project future installments, and current < total
+        if (
+          isCard &&
+          projectFutureInstallments &&
+          item.installmentNumber &&
+          item.totalInstallments &&
+          item.installmentNumber < item.totalInstallments
+        ) {
+          const baseDate = new Date(item.date + 'T12:00:00Z');
+          const cleanBaseDesc = item.description.replace(/\s+\d+\s*(?:\/|de)\s*\d+\s*$/i, '').trim();
+
+          for (let p = item.installmentNumber + 1; p <= item.totalInstallments; p++) {
+            const monthsAhead = p - item.installmentNumber;
+            const nextDate = new Date(baseDate);
+            nextDate.setUTCMonth(nextDate.getUTCMonth() + monthsAhead);
+
+            toSave.push({
+              description: `${cleanBaseDesc} ${p}/${item.totalInstallments}`,
+              amount: item.amount,
+              date: nextDate.toISOString().split('T')[0],
+              type: item.type,
+              category: item.assignedCategory,
+              paymentMethod: PaymentMethod.CREDIT_CARD,
+              creditCardId: selectedCardId,
+              installmentId: sharedInstallmentId,
+              isPaid: false,
+            });
+          }
+        }
+      }
 
       await onConfirmImport(toSave);
       onClose();
@@ -468,7 +514,7 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
             /* Step 2: Preview & Adjustments */
             <div className="space-y-4">
               {/* Top Stats Banner */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
+              <div className={`grid grid-cols-2 sm:grid-cols-4 ${installmentCount > 0 ? 'lg:grid-cols-5' : ''} gap-2.5 sm:gap-3`}>
                 <div className="bg-slate-800/60 border border-white/[0.06] p-3 rounded-xl">
                   <span className="text-[11px] text-slate-400 block font-medium">Total no Arquivo</span>
                   <div className="flex items-center gap-2">
@@ -504,7 +550,49 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
                   <span className="text-[11px] text-slate-400 block font-medium">Duplicidades</span>
                   <span className="text-lg font-bold text-amber-400">{duplicateCount}</span>
                 </div>
+                {installmentCount > 0 && (
+                  <div className="bg-slate-800/60 border border-indigo-500/30 p-3 rounded-xl">
+                    <span className="text-[11px] text-indigo-300 block font-medium">Parceladas</span>
+                    <div className="flex items-center gap-1.5">
+                      <i className="fa-solid fa-layer-group text-xs text-indigo-400"></i>
+                      <span className="text-lg font-bold text-indigo-300">{installmentCount} itens</span>
+                    </div>
+                  </div>
+                )}
               </div>
+
+              {/* Projection of future installments if importing to credit card */}
+              {destinationType === 'card' && installmentCount > 0 && (
+                <div className="p-3.5 rounded-2xl bg-indigo-950/40 border border-indigo-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fadeIn">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 flex items-center justify-center text-sm flex-shrink-0">
+                      <i className="fa-solid fa-wand-magic-sparkles"></i>
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs sm:text-sm font-semibold text-white">
+                          Projetar parcelas futuras restantes no cartão?
+                        </p>
+                        <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                          {installmentCount} identificada{installmentCount > 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Gera automaticamente os lançamentos dos meses seguintes para as compras parceladas (ex: 3/6 a 6/6).
+                      </p>
+                    </div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer flex-shrink-0 self-end sm:self-auto">
+                    <input
+                      type="checkbox"
+                      checked={projectFutureInstallments}
+                      onChange={(e) => setProjectFutureInstallments(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-10 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                  </label>
+                </div>
+              )}
 
               {/* Action Toolbar */}
               <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 pt-2">
@@ -551,9 +639,12 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
                     onChange={(e) => setTypeFilter(e.target.value as any)}
                     className="bg-slate-800/80 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none"
                   >
-                    <option value="all">Todas</option>
+                    <option value="all">Todas ({items.length})</option>
                     <option value="EXPENSE">Despesas</option>
                     <option value="INCOME">Receitas</option>
+                    {installmentCount > 0 && (
+                      <option value="INSTALLMENT">Parceladas ({installmentCount})</option>
+                    )}
                   </select>
                 </div>
               </div>
@@ -596,6 +687,15 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
                                 >
                                   {isIncome ? 'Receita' : 'Despesa'}
                                 </span>
+                                {item.installmentStr && (
+                                  <span
+                                    className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 flex items-center gap-1"
+                                    title={`Compra parcelada: ${item.installmentStr}`}
+                                  >
+                                    <i className="fa-solid fa-layer-group text-[9px]"></i>
+                                    Parcela {item.installmentStr}
+                                  </span>
+                                )}
                                 {item.isDuplicate && (
                                   <span
                                     className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center gap-1"

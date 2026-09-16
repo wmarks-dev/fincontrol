@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { CreditCard, Transaction, TransactionType, Category } from '../types';
 import { getBillInfoForDueDate, parseISODateAsUTC } from '../utils/dateUtils';
 import { getCardTheme } from './RealisticCreditCard';
+import { extractInstallmentInfo } from '../utils/importParsers';
 
 const formatCurrency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -143,7 +144,21 @@ const BillHistoryModal: React.FC<BillHistoryModalProps> = ({ card, transactions,
                       <i className={category?.icon || 'fa-solid fa-tag'}></i>
                     </div>
                     <div className="min-w-0">
-                      <p className="font-semibold text-sm text-slate-200 truncate">{t.description}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold text-sm text-slate-200 truncate">{t.description}</p>
+                        {(() => {
+                          const inst = extractInstallmentInfo(t.description);
+                          if (inst.installmentStr) {
+                            return (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 flex-shrink-0">
+                                <i className="fa-solid fa-layer-group text-[8px]"></i>
+                                {inst.installmentStr}
+                              </span>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
                       <p className="text-xs text-slate-500">
                         {new Date(t.date).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
                       </p>

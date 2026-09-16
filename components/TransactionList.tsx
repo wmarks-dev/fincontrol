@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Transaction, TransactionType, PaymentMethod, Category } from '../types';
 import { parseISODateAsUTC } from '../utils/dateUtils';
+import { extractInstallmentInfo } from '../utils/importParsers';
 
 interface TransactionListProps {
   transactions: Transaction[];
@@ -63,11 +64,11 @@ const getInstallmentData = (description: string, isIncome: boolean, installmentI
     };
   }
 
-  const match = (description || '').match(/\s+(\d+)\s*(?:\/|de)\s*(\d+)\s*$/i);
-  if (match) {
+  const inst = extractInstallmentInfo(description);
+  if (inst.installmentStr) {
     return {
-      installmentStr: `${match[1]}/${match[2]}`,
-      cleanDescription: description.replace(/\s+\d+\s*(?:\/|de)\s*\d+\s*$/i, '').trim() || description,
+      installmentStr: inst.installmentStr,
+      cleanDescription: inst.cleanDesc || description,
     };
   }
 
@@ -99,7 +100,7 @@ const TransactionItem: React.FC<TransactionItemProps> = ({
 }) => {
   const category = allCategories.find((c) => c.id === transaction.category);
   const isIncome = transaction.type === TransactionType.INCOME;
-  const canBeEdited = !transaction.installmentId && !transaction.recurringId;
+  const canBeEdited = !transaction.recurringId;
   const { installmentStr, cleanDescription } = getInstallmentData(
     transaction.description,
     isIncome,
@@ -135,7 +136,7 @@ const TransactionItem: React.FC<TransactionItemProps> = ({
             )}
 
             {/* Installment Tag */}
-            {transaction.installmentId && (
+            {(transaction.installmentId || installmentStr !== '-') && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
                 <i className="fa-solid fa-layer-group text-[9px]"></i>
                 <span>{installmentStr !== '-' && installmentStr !== 'Parcelada' ? `Parcela ${installmentStr}` : 'Parcelada'}</span>
