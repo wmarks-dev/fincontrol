@@ -14,6 +14,7 @@ import {
     FinancialGoal,
     GoalContribution,
     Category,
+    CardMonthlyClosing,
 } from '../types';
 import { CATEGORIES } from '../constants';
 import { parseISODateAsUTC } from '../utils/dateUtils';
@@ -27,6 +28,7 @@ export interface DataContextType {
     loans: Loan[];
     loanPayments: LoanPayment[];
     creditCards: CreditCard[];
+    cardMonthlyClosings: CardMonthlyClosing[];
     bills: Bill[];
     billPayments: BillPayment[];
     billMonthlyAmounts: BillMonthlyAmount[];
@@ -40,11 +42,14 @@ export interface DataContextType {
     addTransaction: (transactions: Omit<Transaction, 'id'>[]) => Promise<void>;
     updateTransaction: (updatedTransaction: Transaction) => Promise<void>;
     deleteTransaction: (transactionId: string) => Promise<void>;
+    moveTransactionToBill: (transactionId: string, targetDueDate: string | null) => Promise<void>;
     addRecurringTransaction: (recurringTxData: Omit<RecurringTransaction, 'id' | 'status'>) => Promise<void>;
     cancelRecurringTransaction: (recurringId: string) => Promise<void>;
     addCreditCard: (cardData: Omit<CreditCard, 'id'>) => Promise<void>;
     updateCreditCard: (cardData: CreditCard) => Promise<void>;
     deleteCreditCard: (cardId: string) => Promise<void>;
+    setCardMonthlyClosing: (cardId: string, year: number, month: number, closingDate: string) => Promise<void>;
+    removeCardMonthlyClosing: (id: string) => Promise<void>;
     handleAddSavingsTransaction: (data: Omit<SavingsTransaction, 'id' | 'date'> & { goalId?: string }) => Promise<void>;
     addLoan: (loanData: Omit<Loan, 'id' | 'paidAmount' | 'status'>) => Promise<void>;
     registerLoanPayment: (loanId: string, paymentAmount: number, paymentDate: string) => Promise<void>;
@@ -87,6 +92,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [loans, setLoans] = useState<Loan[]>([]);
     const [loanPayments, setLoanPayments] = useState<LoanPayment[]>([]);
     const [creditCards, setCreditCards] = useState<CreditCard[]>([]);
+    const [cardMonthlyClosings, setCardMonthlyClosings] = useState<CardMonthlyClosing[]>([]);
     const [bills, setBills] = useState<Bill[]>([]);
     const [billPayments, setBillPayments] = useState<BillPayment[]>([]);
     const [billMonthlyAmounts, setBillMonthlyAmounts] = useState<BillMonthlyAmount[]>([]);
@@ -110,6 +116,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setLoans([]);
             setLoanPayments([]);
             setCreditCards([]);
+            setCardMonthlyClosings([]);
             setBills([]);
             setBillPayments([]);
             setBudgets([]);
@@ -127,6 +134,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setLoans(data.loans);
             setLoanPayments(data.loanPayments);
             setCreditCards(data.creditCards);
+            setCardMonthlyClosings(data.cardMonthlyClosings || []);
             setBills(data.bills);
             setBillPayments(data.billPayments);
             setBillMonthlyAmounts(data.billMonthlyAmounts || []);
@@ -219,6 +227,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         await refreshData();
     };
 
+    const moveTransactionToBill = async (transactionId: string, targetDueDate: string | null) => {
+        if (!userId) return;
+        await api.setTransactionCustomDueDate(userId, transactionId, targetDueDate);
+        setTransactions(prev => prev.map(t => t.id === transactionId ? { ...t, customDueDate: targetDueDate } : t));
+    };
+
     const addRecurringTransaction = async (data: Omit<RecurringTransaction, 'id' | 'status'>) => {
         if (!userId) return;
         await api.addRecurringTransaction(userId, data);
@@ -246,6 +260,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const deleteCreditCard = async (id: string) => {
         if (!userId) return;
         await api.deleteCreditCard(userId, id);
+        await refreshData();
+    };
+
+    const setCardMonthlyClosing = async (cardId: string, year: number, month: number, closingDate: string) => {
+        if (!userId) return;
+        await api.setCardMonthlyClosing(userId, { cardId, year, month, closingDate });
+        await refreshData();
+    };
+
+    const removeCardMonthlyClosing = async (id: string) => {
+        if (!userId) return;
+        await api.removeCardMonthlyClosing(userId, id);
         await refreshData();
     };
 
@@ -381,6 +407,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         loans,
         loanPayments,
         creditCards,
+        cardMonthlyClosings,
         bills,
         billPayments,
         billMonthlyAmounts,
@@ -392,11 +419,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         addTransaction,
         updateTransaction,
         deleteTransaction,
+        moveTransactionToBill,
         addRecurringTransaction,
         cancelRecurringTransaction,
         addCreditCard,
         updateCreditCard,
         deleteCreditCard,
+        setCardMonthlyClosing,
+        removeCardMonthlyClosing,
         handleAddSavingsTransaction,
         addLoan,
         registerLoanPayment,

@@ -12,6 +12,7 @@ import {
   FinancialGoal,
   GoalContribution,
   Category,
+  CardMonthlyClosing,
 } from '../types';
 
 export interface AllUserData {
@@ -21,6 +22,7 @@ export interface AllUserData {
   loans: Loan[];
   loanPayments: LoanPayment[];
   creditCards: CreditCard[];
+  cardMonthlyClosings: CardMonthlyClosing[];
   bills: Bill[];
   billPayments: BillPayment[];
   billMonthlyAmounts: BillMonthlyAmount[];
@@ -81,6 +83,12 @@ export const api = {
       method: 'DELETE',
     }),
 
+  setTransactionCustomDueDate: (userId: string, transactionId: string, customDueDate: string | null) =>
+    request<{ success: boolean }>(`/api/transactions/${transactionId}/custom-due-date`, userId, {
+      method: 'PATCH',
+      body: JSON.stringify({ customDueDate }),
+    }),
+
   // Recurring
   addRecurringTransaction: (userId: string, data: Omit<RecurringTransaction, 'id' | 'status'>) =>
     request<{ success: boolean; id: string }>('/api/recurring', userId, {
@@ -108,6 +116,20 @@ export const api = {
 
   deleteCreditCard: (userId: string, id: string) =>
     request<{ success: boolean }>(`/api/cards/${id}`, userId, {
+      method: 'DELETE',
+    }),
+
+  setCardMonthlyClosing: (
+    userId: string,
+    data: { cardId: string; year: number; month: number; closingDate: string; id?: string }
+  ) =>
+    request<{ success: boolean; id: string }>('/api/cards/monthly-closing', userId, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  removeCardMonthlyClosing: (userId: string, id: string) =>
+    request<{ success: boolean }>(`/api/cards/monthly-closing/${id}`, userId, {
       method: 'DELETE',
     }),
 
@@ -287,6 +309,7 @@ export interface BackupPayload {
     transactions: any[];
     recurringTransactions: any[];
     creditCards: any[];
+    cardMonthlyClosings?: any[];
     savingsTransactions: any[];
     loans: any[];
     loanPayments: any[];
@@ -301,6 +324,7 @@ export interface BackupPayload {
   summary: {
     totalTransactions: number;
     totalCreditCards: number;
+    totalCardClosings?: number;
     totalBills: number;
     totalBudgets: number;
     totalGoals: number;
@@ -314,6 +338,7 @@ export interface RestoreResponse {
   stats: {
     transactions: number;
     creditCards: number;
+    cardMonthlyClosings?: number;
     bills: number;
     budgets: number;
     financialGoals: number;

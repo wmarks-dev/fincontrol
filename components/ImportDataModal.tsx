@@ -3,6 +3,13 @@ import { Transaction, CreditCard, Category, TransactionType, PaymentMethod } fro
 import { parseOFX, parseCSV, parseXLSX, downloadFinControlTemplate, ParsedImportItem } from '../utils/importParsers';
 import { suggestCategory } from '../utils/smartCategorizer';
 import { checkDuplicate } from '../utils/duplicateDetector';
+import { useData } from '../contexts/DataContext';
+import {
+  getCurrentOpenBillInfo,
+  getMostRecentlyClosedBillInfo,
+  getAdjacentBillDueDate,
+  getBillInfoForDueDate,
+} from '../utils/dateUtils';
 
 interface ImportDataModalProps {
   isOpen: boolean;
@@ -35,6 +42,7 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
   onConfirmImport,
   initialCreditCardId,
 }) => {
+  const { cardMonthlyClosings } = useData();
   const [step, setStep] = useState<'upload' | 'preview'>('upload');
   const [fileName, setFileName] = useState<string>('');
   const [fileFormat, setFileFormat] = useState<'OFX' | 'CSV' | 'XLSX'>('OFX');
@@ -42,6 +50,7 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
   // Destination settings
   const [destinationType, setDestinationType] = useState<'account' | 'card'>('account');
   const [selectedCardId, setSelectedCardId] = useState<string>('');
+  const [targetBillOption, setTargetBillOption] = useState<'auto' | 'current' | 'next' | 'prev'>('auto');
   const [accountPaymentMethod, setAccountPaymentMethod] = useState<PaymentMethod>(PaymentMethod.DEBIT);
   const [projectFutureInstallments, setProjectFutureInstallments] = useState(false);
 
@@ -54,6 +63,34 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const selectedCard = useMemo(
+    () => creditCards.find((c) => c.id === selectedCardId),
+    [creditCards, selectedCardId]
+  );
+
+  const cardBillOptions = useMemo(() => {
+    if (!selectedCard) return null;
+    const today = new Date();
+    const currentOpenBill = getCurrentOpenBillInfo(selectedCard, today, cardMonthlyClosings);
+    const currentClosedBill = getMostRecentlyClosedBillInfo(selectedCard, today, cardMonthlyClosings);
+    const nextDueDate = getAdjacentBillDueDate(selectedCard, currentOpenBill.dueDate, 'next', cardMonthlyClosings);
+
+    return {
+      current: {
+        label: `Fatura Atual (Venc. ${currentOpenBill.dueDate.toLocaleDateString('pt-BR', { timeZone: 'UTC' })})`,
+        dueDateISO: currentOpenBill.dueDate.toISOString().split('T')[0],
+      },
+      next: {
+        label: `Próxima Fatura (Venc. ${new Date(nextDueDate + 'T12:00:00Z').toLocaleDateString('pt-BR', { timeZone: 'UTC' })})`,
+        dueDateISO: nextDueDate,
+      },
+      prev: {
+        label: `Fatura Fechada/Anterior (Venc. ${currentClosedBill.dueDate.toLocaleDateString('pt-BR', { timeZone: 'UTC' })})`,
+        dueDateISO: currentClosedBill.dueDate.toISOString().split('T')[0],
+      },
+    };
+  }, [selectedCard, cardMonthlyClosings]);
+
   // Initialize or reset when modal opens
   useEffect(() => {
     if (isOpen) {
@@ -63,6 +100,7 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
       setSearchQuery('');
       setTypeFilter('all');
       setProjectFutureInstallments(false);
+      setTargetBillOption('auto');
 
       if (initialCreditCardId && creditCards.some((c) => c.id === initialCreditCardId)) {
         setDestinationType('card');
@@ -239,6 +277,11 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
       const toSave: Omit<Transaction, 'id'>[] = [];
       const isCard = destinationType === 'card';
 
+      const targetCustomDueDate =
+        isCard && targetBillOption !== 'auto' && cardBillOptions
+          ? cardBillOptions[targetBillOption].dueDateISO
+          : undefined;
+
       for (const item of selectedItems) {
         const sharedInstallmentId = item.installmentStr
           ? `inst_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
@@ -258,6 +301,7 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
           creditCardId: isCard ? selectedCardId : null,
           installmentId: sharedInstallmentId,
           isPaid: isCard ? false : true,
+          customDueDate: targetCustomDueDate,
         });
 
         // If card destination, user opted to project future installments, and current < total
@@ -276,6 +320,14 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
             const nextDate = new Date(baseDate);
             nextDate.setUTCMonth(nextDate.getUTCMonth() + monthsAhead);
 
+            let futureDueDate: string | undefined = undefined;
+            if (targetCustomDueDate && selectedCard) {
+              const baseDue = new Date(targetCustomDueDate + 'T12:00:00Z');
+              const futureTarget = new Date(Date.UTC(baseDue.getUTCFullYear(), baseDue.getUTCMonth() + monthsAhead, 1));
+              const info = getBillInfoForDueDate(selectedCard, futureTarget, cardMonthlyClosings);
+              futureDueDate = info.dueDate.toISOString().split('T')[0];
+            }
+
             toSave.push({
               description: `${cleanBaseDesc} ${p}/${item.totalInstallments}`,
               amount: item.amount,
@@ -286,6 +338,7 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
               creditCardId: selectedCardId,
               installmentId: sharedInstallmentId,
               isPaid: false,
+              customDueDate: futureDueDate,
             });
           }
         }
@@ -406,19 +459,49 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
 
                 {/* Sub-selectors */}
                 {destinationType === 'card' && creditCards.length > 0 && (
-                  <div className="pt-2 animate-fadeIn">
-                    <label className="block text-xs text-slate-400 mb-1">Selecione o Cartão de Crédito:</label>
-                    <select
-                      value={selectedCardId}
-                      onChange={(e) => setSelectedCardId(e.target.value)}
-                      className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
-                    >
-                      {creditCards.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name} (Vencimento dia {c.dueDay})
-                        </option>
-                      ))}
-                    </select>
+                  <div className="pt-2 space-y-3 animate-fadeIn">
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">Selecione o Cartão de Crédito:</label>
+                      <select
+                        value={selectedCardId}
+                        onChange={(e) => setSelectedCardId(e.target.value)}
+                        className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                      >
+                        {creditCards.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} (Vencimento dia {c.dueDay})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {cardBillOptions && (
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-xs text-slate-400">Vincular compras à fatura:</label>
+                          {targetBillOption !== 'auto' && (
+                            <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20">
+                              Fatura Fixada
+                            </span>
+                          )}
+                        </div>
+                        <select
+                          value={targetBillOption}
+                          onChange={(e) => setTargetBillOption(e.target.value as any)}
+                          className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                        >
+                          <option value="auto">Automático (pela data de cada compra)</option>
+                          <option value="current">{cardBillOptions.current.label}</option>
+                          <option value="next">{cardBillOptions.next.label}</option>
+                          <option value="prev">{cardBillOptions.prev.label}</option>
+                        </select>
+                        <p className="text-[11px] text-slate-500 mt-1">
+                          {targetBillOption === 'auto'
+                            ? 'As compras serão alocadas na fatura pelo dia de fechamento do cartão.'
+                            : 'Todas as compras deste arquivo entrarão na fatura selecionada, garantindo que o valor bata com o banco.'}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -591,6 +674,48 @@ const ImportDataModal: React.FC<ImportDataModalProps> = ({
                     />
                     <div className="w-10 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
                   </label>
+                </div>
+              )}
+
+              {/* Target Bill Selection Bar in Preview */}
+              {destinationType === 'card' && selectedCard && cardBillOptions && (
+                <div className="p-3.5 rounded-2xl bg-slate-800/60 border border-white/[0.08] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fadeIn">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-300 flex items-center justify-center text-sm flex-shrink-0">
+                      <i className="fa-solid fa-credit-card"></i>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs sm:text-sm font-semibold text-white truncate">
+                          {selectedCard.name}
+                        </span>
+                        {targetBillOption !== 'auto' && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 flex-shrink-0">
+                            Fatura Fixada
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        {targetBillOption === 'auto'
+                          ? 'Alocação automática pelo dia de fechamento'
+                          : `Vinculando à: ${cardBillOptions[targetBillOption].label}`}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="w-full sm:w-auto flex items-center gap-2 flex-shrink-0">
+                    <span className="text-xs text-slate-400 hidden sm:inline">Vincular a:</span>
+                    <select
+                      value={targetBillOption}
+                      onChange={(e) => setTargetBillOption(e.target.value as any)}
+                      className="w-full sm:w-auto bg-slate-900 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                    >
+                      <option value="auto">Automático (por data)</option>
+                      <option value="current">{cardBillOptions.current.label}</option>
+                      <option value="next">{cardBillOptions.next.label}</option>
+                      <option value="prev">{cardBillOptions.prev.label}</option>
+                    </select>
+                  </div>
                 </div>
               )}
 

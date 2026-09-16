@@ -74,6 +74,18 @@ export async function initDb() {
         );
         CREATE INDEX IF NOT EXISTS idx_cards_user ON credit_cards(user_id);
 
+        CREATE TABLE IF NOT EXISTS card_monthly_closings (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          card_id TEXT NOT NULL,
+          year INTEGER NOT NULL,
+          month INTEGER NOT NULL,
+          closing_date TEXT NOT NULL,
+          created_at TEXT DEFAULT (datetime('now')),
+          UNIQUE(user_id, card_id, year, month)
+        );
+        CREATE INDEX IF NOT EXISTS idx_card_closings_user ON card_monthly_closings(user_id);
+
         CREATE TABLE IF NOT EXISTS savings_transactions (
           id TEXT PRIMARY KEY,
           user_id TEXT NOT NULL,
@@ -214,6 +226,12 @@ export async function initDb() {
 
       try {
         await db.exec(`ALTER TABLE bills ADD COLUMN start_month INTEGER;`);
+      } catch (e) {
+        // column already exists, safe to ignore
+      }
+
+      try {
+        await db.exec(`ALTER TABLE transactions ADD COLUMN custom_due_date TEXT;`);
       } catch (e) {
         // column already exists, safe to ignore
       }

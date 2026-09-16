@@ -28,6 +28,7 @@ export interface Transaction {
   installmentId?: string;
   recurringId?: string;
   isPaid?: boolean; // For credit card bills
+  customDueDate?: string | null; // Overrides the calculated bill due date (YYYY-MM-DD)
 }
 
 export interface CreditCard {
@@ -37,6 +38,14 @@ export interface CreditCard {
   dueDay: number; // Day of the month
   limit: number;
   theme?: 'black' | 'purple' | 'emerald' | 'blue' | 'gold' | 'rose' | string;
+}
+
+export interface CardMonthlyClosing {
+  id: string;
+  cardId: string;
+  year: number;
+  month: number; // 0-11
+  closingDate: string; // ISO format 'YYYY-MM-DD'
 }
 
 export interface RecurringTransaction {

@@ -43,6 +43,7 @@ app.get('/api/data', async (req, res) => {
       goalsRows,
       contributionsRows,
       categoriesRows,
+      cardMonthlyClosingsRows,
     ] = await Promise.all([
       db.all('SELECT * FROM transactions WHERE user_id = ? ORDER BY date DESC, created_at DESC', userId),
       db.all('SELECT * FROM recurring_transactions WHERE user_id = ? ORDER BY date ASC', userId),
@@ -57,6 +58,7 @@ app.get('/api/data', async (req, res) => {
       db.all('SELECT * FROM financial_goals WHERE user_id = ?', userId),
       db.all('SELECT * FROM goal_contributions WHERE user_id = ? ORDER BY date DESC', userId),
       db.all('SELECT * FROM custom_categories WHERE user_id = ? ORDER BY name ASC', userId),
+      db.all('SELECT * FROM card_monthly_closings WHERE user_id = ? ORDER BY year ASC, month ASC', userId),
     ]);
 
     const data = {
@@ -72,6 +74,7 @@ app.get('/api/data', async (req, res) => {
         installmentId: r.installment_id || undefined,
         recurringId: r.recurring_id || undefined,
         isPaid: Boolean(r.is_paid),
+        customDueDate: r.custom_due_date || undefined,
       })),
       recurringTransactions: recurringRows.map(r => ({
         id: r.id,
@@ -91,6 +94,13 @@ app.get('/api/data', async (req, res) => {
         dueDay: Number(r.due_day),
         limit: Number(r.limit_amount),
         theme: r.theme || 'black',
+      })),
+      cardMonthlyClosings: cardMonthlyClosingsRows.map(r => ({
+        id: r.id,
+        cardId: r.card_id,
+        year: Number(r.year),
+        month: Number(r.month),
+        closingDate: r.closing_date,
       })),
       savingsTransactions: savingsRows.map(r => ({
         id: r.id,
@@ -195,8 +205,8 @@ app.post('/api/transactions', async (req, res) => {
       const insertStmt = await db.prepare(`
         INSERT INTO transactions (
           id, user_id, description, amount, date, type, category,
-          payment_method, credit_card_id, installment_id, recurring_id, is_paid
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          payment_method, credit_card_id, installment_id, recurring_id, is_paid, custom_due_date
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       for (const t of transactions) {
@@ -213,7 +223,8 @@ app.post('/api/transactions', async (req, res) => {
           t.creditCardId || null,
           t.installmentId || null,
           t.recurringId || null,
-          t.isPaid ? 1 : 0
+          t.isPaid ? 1 : 0,
+          t.customDueDate || null
         );
       }
       await insertStmt.finalize();
@@ -277,7 +288,8 @@ app.put('/api/transactions/:id', async (req, res) => {
         credit_card_id = ?,
         installment_id = ?,
         recurring_id = ?,
-        is_paid = ?
+        is_paid = ?,
+        custom_due_date = ?
       WHERE id = ? AND user_id = ?`,
       t.description,
       t.amount,
@@ -289,6 +301,7 @@ app.put('/api/transactions/:id', async (req, res) => {
       t.installmentId || null,
       t.recurringId || null,
       t.isPaid ? 1 : 0,
+      t.customDueDate !== undefined ? (t.customDueDate || null) : null,
       id,
       userId
     );
@@ -296,6 +309,27 @@ app.put('/api/transactions/:id', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Erro em PUT /api/transactions/:id:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.patch('/api/transactions/:id/custom-due-date', async (req, res) => {
+  try {
+    const db = await initDb();
+    const userId = req.userId;
+    const { id } = req.params;
+    const { customDueDate } = req.body;
+
+    await db.run(
+      'UPDATE transactions SET custom_due_date = ? WHERE id = ? AND user_id = ?',
+      customDueDate || null,
+      id,
+      userId
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Erro em PATCH /api/transactions/:id/custom-due-date:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -425,6 +459,53 @@ app.delete('/api/cards/:id', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Erro em DELETE /api/cards/:id:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ----------------------------------------------------
+// Card Monthly Closings (Ajuste dinâmico de fechamento)
+// ----------------------------------------------------
+app.post('/api/cards/monthly-closing', async (req, res) => {
+  try {
+    const db = await initDb();
+    const userId = req.userId;
+    const { cardId, year, month, closingDate } = req.body;
+    const id = req.body.id || randomUUID();
+
+    if (!cardId || year === undefined || month === undefined || !closingDate) {
+      return res.status(400).json({ error: 'Dados incompletos para fechamento mensal' });
+    }
+
+    await db.run(
+      `INSERT INTO card_monthly_closings (id, user_id, card_id, year, month, closing_date)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, card_id, year, month) DO UPDATE SET closing_date = excluded.closing_date`,
+      id,
+      userId,
+      cardId,
+      Number(year),
+      Number(month),
+      closingDate
+    );
+
+    res.json({ success: true, id });
+  } catch (error) {
+    console.error('Erro em POST /api/cards/monthly-closing:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/cards/monthly-closing/:id', async (req, res) => {
+  try {
+    const db = await initDb();
+    const userId = req.userId;
+    const { id } = req.params;
+
+    await db.run('DELETE FROM card_monthly_closings WHERE id = ? AND user_id = ?', id, userId);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Erro em DELETE /api/cards/monthly-closing/:id:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -999,6 +1080,7 @@ app.get('/api/backup', async (req, res) => {
       financialGoals,
       goalContributions,
       customCategories,
+      cardMonthlyClosings,
     ] = await Promise.all([
       db.all('SELECT * FROM transactions WHERE user_id = ?', userId),
       db.all('SELECT * FROM recurring_transactions WHERE user_id = ?', userId),
@@ -1013,6 +1095,7 @@ app.get('/api/backup', async (req, res) => {
       db.all('SELECT * FROM financial_goals WHERE user_id = ?', userId),
       db.all('SELECT * FROM goal_contributions WHERE user_id = ?', userId),
       db.all('SELECT * FROM custom_categories WHERE user_id = ?', userId),
+      db.all('SELECT * FROM card_monthly_closings WHERE user_id = ?', userId),
     ]);
 
     const backupPayload = {
@@ -1024,6 +1107,7 @@ app.get('/api/backup', async (req, res) => {
         transactions,
         recurringTransactions,
         creditCards,
+        cardMonthlyClosings,
         savingsTransactions,
         loans,
         loanPayments,
@@ -1038,6 +1122,7 @@ app.get('/api/backup', async (req, res) => {
       summary: {
         totalTransactions: transactions.length,
         totalCreditCards: creditCards.length,
+        totalCardClosings: cardMonthlyClosings.length,
         totalBills: bills.length,
         totalBudgets: budgets.length,
         totalGoals: financialGoals.length,
@@ -1098,6 +1183,7 @@ app.post('/api/restore', async (req, res) => {
       await db.run('DELETE FROM savings_transactions WHERE user_id = ?', userId);
       await db.run('DELETE FROM recurring_transactions WHERE user_id = ?', userId);
       await db.run('DELETE FROM transactions WHERE user_id = ?', userId);
+      await db.run('DELETE FROM card_monthly_closings WHERE user_id = ?', userId);
       await db.run('DELETE FROM credit_cards WHERE user_id = ?', userId);
       await db.run('DELETE FROM custom_categories WHERE user_id = ?', userId);
 
@@ -1107,8 +1193,8 @@ app.post('/api/restore', async (req, res) => {
           await db.run(
             `INSERT INTO transactions (
               id, user_id, description, amount, date, type, category,
-              payment_method, credit_card_id, installment_id, recurring_id, is_paid
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              payment_method, credit_card_id, installment_id, recurring_id, is_paid, custom_due_date
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             t.id,
             userId,
             t.description,
@@ -1120,7 +1206,8 @@ app.post('/api/restore', async (req, res) => {
             t.credit_card_id || t.creditCardId || null,
             t.installment_id || t.installmentId || null,
             t.recurring_id || t.recurringId || null,
-            t.is_paid !== undefined ? (t.is_paid ? 1 : 0) : (t.isPaid ? 1 : 0)
+            t.is_paid !== undefined ? (t.is_paid ? 1 : 0) : (t.isPaid ? 1 : 0),
+            t.custom_due_date || t.customDueDate || null
           );
         }
       }
@@ -1161,6 +1248,23 @@ app.post('/api/restore', async (req, res) => {
             c.due_day || c.dueDay,
             c.limit_amount || c.limit,
             c.theme || 'black'
+          );
+        }
+      }
+
+      // Re-insert card monthly closings
+      if (Array.isArray(data.cardMonthlyClosings)) {
+        for (const mc of data.cardMonthlyClosings) {
+          await db.run(
+            `INSERT INTO card_monthly_closings (
+              id, user_id, card_id, year, month, closing_date
+            ) VALUES (?, ?, ?, ?, ?, ?)`,
+            mc.id,
+            userId,
+            mc.card_id || mc.cardId,
+            Number(mc.year),
+            Number(mc.month),
+            mc.closing_date || mc.closingDate
           );
         }
       }
@@ -1353,6 +1457,7 @@ app.post('/api/restore', async (req, res) => {
           savingsTransactions: (data.savingsTransactions || []).length,
           loans: (data.loans || []).length,
           customCategories: (data.customCategories || []).length,
+          cardMonthlyClosings: (data.cardMonthlyClosings || []).length,
         },
       });
     } catch (err) {
