@@ -266,6 +266,7 @@ interface CardBillViewProps {
   onEdit: (card: CreditCard) => void;
   onDelete: (cardId: string) => void;
   onViewHistory: (card: CreditCard) => void;
+  onImportBill?: (cardId: string) => void;
 }
 
 const CardBillView: React.FC<CardBillViewProps> = ({
@@ -274,6 +275,7 @@ const CardBillView: React.FC<CardBillViewProps> = ({
   onEdit,
   onDelete,
   onViewHistory,
+  onImportBill,
   allCategories,
 }) => {
   const [billType, setBillType] = useState<'current' | 'closed'>('current');
@@ -461,14 +463,26 @@ const CardBillView: React.FC<CardBillViewProps> = ({
         )}
       </div>
 
-      {/* View History Button */}
-      <div className="mt-auto">
+      {/* View History and Import Buttons */}
+      <div className="mt-auto flex items-center gap-2">
+        {onImportBill && (
+          <button
+            onClick={() => onImportBill(card.id)}
+            className="flex-1 py-2.5 px-3 bg-indigo-600/15 hover:bg-indigo-600/25 text-indigo-300 hover:text-white rounded-xl transition-all text-xs font-semibold border border-indigo-500/30 flex items-center justify-center gap-2 shadow-sm"
+            title="Importar fatura deste cartão via OFX ou CSV"
+          >
+            <i className="fa-solid fa-file-import text-xs"></i>
+            <span>Importar Fatura</span>
+          </button>
+        )}
         <button
           onClick={() => onViewHistory(card)}
-          className="w-full text-center py-2.5 px-4 bg-slate-800/90 hover:bg-slate-700 text-slate-200 rounded-xl transition-all text-xs font-semibold border border-white/[0.08] hover:border-blue-500/30 flex items-center justify-center gap-2 shadow-sm"
+          className={`${
+            onImportBill ? 'flex-1' : 'w-full'
+          } text-center py-2.5 px-4 bg-slate-800/90 hover:bg-slate-700 text-slate-200 rounded-xl transition-all text-xs font-semibold border border-white/[0.08] hover:border-blue-500/30 flex items-center justify-center gap-2 shadow-sm`}
         >
           <i className="fa-solid fa-calendar-days text-slate-400 text-xs"></i>
-          <span>Ver Histórico de Faturas</span>
+          <span>{onImportBill ? 'Faturas' : 'Ver Histórico de Faturas'}</span>
         </button>
       </div>
     </div>
@@ -483,6 +497,7 @@ interface CardsManagementProps {
   transactions: Transaction[];
   allCategories: Category[];
   onDeleteCard: (cardId: string) => void;
+  onOpenImport?: (cardId?: string) => void;
 }
 
 const CardsManagement: React.FC<CardsManagementProps> = ({
@@ -492,6 +507,7 @@ const CardsManagement: React.FC<CardsManagementProps> = ({
   transactions,
   onDeleteCard,
   allCategories,
+  onOpenImport,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCard, setEditingCard] = useState<CreditCard | null>(null);
@@ -534,13 +550,25 @@ const CardsManagement: React.FC<CardsManagementProps> = ({
             Gerencie limites, faturas abertas e datas de vencimento em formato de cartões realistas
           </p>
         </div>
-        <button
-          onClick={() => handleOpenModal(null)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl transition-all text-xs sm:text-sm font-semibold shadow-lg shadow-blue-500/25 active:scale-95"
-        >
-          <i className="fa-solid fa-plus"></i>
-          <span>Adicionar Cartão</span>
-        </button>
+        <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+          {onOpenImport && (
+            <button
+              onClick={() => onOpenImport()}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3.5 py-2.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl transition-all text-xs sm:text-sm font-semibold border border-white/10 shadow-sm"
+              title="Importar fatura de cartão via OFX ou CSV"
+            >
+              <i className="fa-solid fa-file-import text-blue-400"></i>
+              <span>Importar Fatura</span>
+            </button>
+          )}
+          <button
+            onClick={() => handleOpenModal(null)}
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl transition-all text-xs sm:text-sm font-semibold shadow-lg shadow-blue-500/25 active:scale-95"
+          >
+            <i className="fa-solid fa-plus"></i>
+            <span>Adicionar Cartão</span>
+          </button>
+        </div>
       </div>
 
       {/* Cards Grid */}
@@ -555,6 +583,7 @@ const CardsManagement: React.FC<CardsManagementProps> = ({
               onEdit={handleOpenModal}
               onDelete={onDeleteCard}
               onViewHistory={handleViewHistory}
+              onImportBill={onOpenImport}
             />
           ))}
         </div>

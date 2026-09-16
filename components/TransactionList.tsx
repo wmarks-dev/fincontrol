@@ -9,6 +9,7 @@ interface TransactionListProps {
   allCategories: Category[];
   initialFilters?: { category: string; startDate: string; endDate: string } | null;
   onFiltersApplied?: () => void;
+  onOpenImport?: () => void;
 }
 
 const formatCurrency = (value: number) => {
@@ -211,6 +212,7 @@ const TransactionList: React.FC<TransactionListProps> = ({
   allCategories,
   initialFilters,
   onFiltersApplied,
+  onOpenImport,
 }) => {
   const [isFilterVisible, setIsFilterVisible] = useState(false);
   const [quickFilter, setQuickFilter] = useState<'all' | 'income' | 'expense' | 'creditCard' | 'cash'>('all');
@@ -416,7 +418,17 @@ const TransactionList: React.FC<TransactionListProps> = ({
           <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Extrato Financeiro</h1>
           <p className="text-sm text-slate-400 mt-0.5">Histórico completo e consolidado de movimentações</p>
         </div>
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+          {onOpenImport && (
+            <button
+              onClick={onOpenImport}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white transition-all text-xs font-semibold shadow-md shadow-blue-500/20 active:scale-95"
+              title="Importar extrato bancário OFX ou planilha CSV"
+            >
+              <i className="fa-solid fa-file-import text-xs"></i>
+              <span>Importar Extrato</span>
+            </button>
+          )}
           <button
             onClick={handleExportCSV}
             className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition-all text-xs font-semibold border border-white/[0.08]"

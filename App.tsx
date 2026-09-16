@@ -25,6 +25,7 @@ import GoalsManagement from './components/GoalsManagement';
 import AddGoalModal from './components/AddGoalModal';
 import CategoryManagement from './components/CategoryManagement';
 import AddCategoryModal from './components/AddCategoryModal';
+import ImportDataModal from './components/ImportDataModal';
 
 
 type View = 'dashboard' | 'transactions' | 'cards' | 'recurring' | 'savings' | 'loans' | 'reports' | 'bills' | 'budget' | 'goals' | 'settings';
@@ -58,6 +59,7 @@ const AppContent: React.FC = () => {
   });
   const [addGoalModalProps, setAddGoalModalProps] = useState<{ isOpen: boolean; goalToEdit: FinancialGoal | null }>({ isOpen: false, goalToEdit: null });
   const [addCategoryModalProps, setAddCategoryModalProps] = useState<{isOpen: boolean, categoryToEdit: Category | null}>({isOpen: false, categoryToEdit: null});
+  const [importModalProps, setImportModalProps] = useState<{ isOpen: boolean; initialCardId?: string | null }>({ isOpen: false, initialCardId: null });
   const [confirmationProps, setConfirmationProps] = useState<{ isOpen: boolean; title: string; message: string; onConfirm: () => void; }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
   const [errorProps, setErrorProps] = useState<{ isOpen: boolean; title: string; message: string; }>({ isOpen: false, title: '', message: '' });
   
@@ -254,8 +256,8 @@ const AppContent: React.FC = () => {
     switch(activeView) {
       case 'dashboard': return <Dashboard transactions={data.transactions} creditCards={data.creditCards} savingsTransactions={data.savingsTransactions} bills={data.bills} billPayments={data.billPayments} billMonthlyAmounts={data.billMonthlyAmounts} budgets={data.budgets} financialGoals={data.financialGoals} onPayBill={handlePayBill} allCategories={data.allCategories} onBudgetCategoryClick={handleDashboardCategoryClick} onMonthSummaryClick={handleMonthSummaryClick} />;
       case 'reports': return <Reports transactions={data.transactions} creditCards={data.creditCards} allCategories={data.allCategories} onCategoryClick={handleCategoryReportClick} />;
-      case 'transactions': return <TransactionList transactions={data.transactions} onEdit={handleEditTransaction} onDelete={handleDeleteTransaction} allCategories={data.allCategories} initialFilters={transactionListFilters} onFiltersApplied={() => setTransactionListFilters(null)} />;
-      case 'cards': return <CardsManagement creditCards={data.creditCards} onAddCard={data.addCreditCard} onUpdateCard={data.updateCreditCard} transactions={data.transactions} onDeleteCard={handleDeleteCreditCard} allCategories={data.allCategories} />;
+      case 'transactions': return <TransactionList transactions={data.transactions} onEdit={handleEditTransaction} onDelete={handleDeleteTransaction} allCategories={data.allCategories} initialFilters={transactionListFilters} onFiltersApplied={() => setTransactionListFilters(null)} onOpenImport={() => setImportModalProps({ isOpen: true, initialCardId: null })} />;
+      case 'cards': return <CardsManagement creditCards={data.creditCards} onAddCard={data.addCreditCard} onUpdateCard={data.updateCreditCard} transactions={data.transactions} onDeleteCard={handleDeleteCreditCard} allCategories={data.allCategories} onOpenImport={(cardId) => setImportModalProps({ isOpen: true, initialCardId: cardId || null })} />;
       case 'recurring': return <RecurringManagement recurringTransactions={data.recurringTransactions} onCancel={handleCancelRecurringTransaction} allCategories={data.allCategories} />;
       case 'savings': return <SavingsManagement savingsTransactions={data.savingsTransactions} onOpenModal={(type) => setSavingsModalProps({ isOpen: true, type })} />;
       case 'loans': return <LoansManagement loans={data.loans} loanPayments={data.loanPayments} onAddLoan={() => setAddLoanModalOpen(true)} onRegisterPayment={(loan) => setLoanPaymentModalProps({ isOpen: true, loan })}/>;
@@ -298,6 +300,7 @@ const AppContent: React.FC = () => {
           onAddCategory={() => setAddCategoryModalProps({isOpen: true, categoryToEdit: null})}
           onUpdateCategory={(cat) => setAddCategoryModalProps({isOpen: true, categoryToEdit: cat})}
           onDeleteCategory={handleDeleteCategory}
+          onOpenImport={() => setImportModalProps({ isOpen: true, initialCardId: null })}
         />;
       default: return <Dashboard transactions={data.transactions} creditCards={data.creditCards} savingsTransactions={data.savingsTransactions} bills={data.bills} billPayments={data.billPayments} billMonthlyAmounts={data.billMonthlyAmounts} budgets={data.budgets} financialGoals={data.financialGoals} onPayBill={handlePayBill} allCategories={data.allCategories} onBudgetCategoryClick={handleDashboardCategoryClick} onMonthSummaryClick={handleMonthSummaryClick} />;
     }
@@ -783,6 +786,18 @@ const AppContent: React.FC = () => {
               existingCategories={data.allCategories}
               onError={showError}
           />
+      )}
+
+      {importModalProps.isOpen && (
+        <ImportDataModal
+          isOpen={importModalProps.isOpen}
+          onClose={() => setImportModalProps({ isOpen: false, initialCardId: null })}
+          creditCards={data.creditCards}
+          allCategories={data.allCategories}
+          existingTransactions={data.transactions}
+          onConfirmImport={data.addTransaction}
+          initialCreditCardId={importModalProps.initialCardId}
+        />
       )}
 
       <ConfirmationModal isOpen={confirmationProps.isOpen} onClose={handleCloseConfirmation} onConfirm={confirmationProps.onConfirm} title={confirmationProps.title} message={confirmationProps.message} />

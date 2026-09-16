@@ -7,6 +7,7 @@ interface CategoryManagementProps {
     onAddCategory: () => void;
     onUpdateCategory: (category: Category) => void;
     onDeleteCategory: (categoryId: string) => void;
+    onOpenImport?: () => void;
 }
 
 interface BackupPreview {
@@ -34,6 +35,7 @@ const CategoryManagement: React.FC<CategoryManagementProps> = ({
     onAddCategory,
     onUpdateCategory,
     onDeleteCategory,
+    onOpenImport,
 }) => {
     const {
         transactions,
@@ -303,6 +305,18 @@ const CategoryManagement: React.FC<CategoryManagementProps> = ({
                             <i className="fa-solid fa-clock-rotate-left text-xs"></i>
                             <span>Restaurar Backup</span>
                         </button>
+
+                        {/* Import OFX/CSV button */}
+                        {onOpenImport && (
+                            <button
+                                onClick={onOpenImport}
+                                className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 hover:text-white font-semibold text-xs sm:text-sm border border-indigo-500/30 transition-all duration-200 active:scale-95"
+                                title="Importar extrato bancário OFX ou planilha CSV"
+                            >
+                                <i className="fa-solid fa-file-import text-xs"></i>
+                                <span>Importar Extrato / CSV</span>
+                            </button>
+                        )}
                     </div>
                 </div>
 
