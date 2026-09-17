@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { DataProvider, useData } from './contexts/DataContext';
 import { UserProvider, useUser } from './contexts/UserContext';
-import { Transaction, Category, TransactionType, Bill, Budget, FinancialGoal, Loan, SavingsTransactionType } from './types';
+import { Transaction, Category, TransactionType, Bill, Budget, FinancialGoal, Loan, SavingsTransactionType, Period } from './types';
 import Dashboard from './components/Dashboard';
 import TransactionList from './components/TransactionList';
 import AddTransactionModal from './components/AddTransactionModal';
@@ -189,30 +189,59 @@ const AppContent: React.FC = () => {
   const showError = (title: string, message: string) => setErrorProps({ isOpen: true, title, message });
   const handleCloseError = () => setErrorProps({ isOpen: false, title: '', message: '' });
 
-  const getDateRangeFromPeriod = (period: '30d' | '90d' | '365d') => {
+  const getDateRangeFromPeriod = (period: Period) => {
     const now = new Date();
-    const endDate = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
-    let startDate = new Date(endDate);
-    if (period === '30d') {
-        startDate.setUTCDate(startDate.getUTCDate() - 30);
-    } else if (period === '90d') {
-        startDate.setUTCDate(startDate.getUTCDate() - 90);
-    } else if (period === '365d') {
-        startDate.setUTCFullYear(startDate.getUTCFullYear() - 1);
-    }
-    startDate.setUTCHours(0, 0, 0, 0);
-    return {
-        startDate: startDate.toISOString().split('T')[0],
-        endDate: endDate.toISOString().split('T')[0],
-    }
-  }
+    const currentYear = now.getUTCFullYear();
+    const currentMonth = now.getUTCMonth();
+    const currentDay = now.getUTCDate();
 
-  const handleCategoryReportClick = (categoryId: string, period: '30d' | '90d' | '365d') => {
+    let startDate: Date;
+    let endDate: Date;
+
+    if (period === 'current_month') {
+      startDate = new Date(Date.UTC(currentYear, currentMonth, 1));
+      const lastDay = new Date(Date.UTC(currentYear, currentMonth + 1, 0)).getUTCDate();
+      endDate = new Date(Date.UTC(currentYear, currentMonth, lastDay));
+    } else if (period === 'previous_month') {
+      let prevYear = currentYear;
+      let prevMonth = currentMonth - 1;
+      if (prevMonth < 0) {
+        prevMonth = 11;
+        prevYear -= 1;
+      }
+      startDate = new Date(Date.UTC(prevYear, prevMonth, 1));
+      const lastDay = new Date(Date.UTC(prevYear, prevMonth + 1, 0)).getUTCDate();
+      endDate = new Date(Date.UTC(prevYear, prevMonth, lastDay));
+    } else if (period === '30d') {
+      endDate = new Date(Date.UTC(currentYear, currentMonth, currentDay));
+      startDate = new Date(endDate);
+      startDate.setUTCDate(startDate.getUTCDate() - 30);
+    } else if (period === '90d') {
+      endDate = new Date(Date.UTC(currentYear, currentMonth, currentDay));
+      startDate = new Date(endDate);
+      startDate.setUTCDate(startDate.getUTCDate() - 90);
+    } else if (period === 'year') {
+      startDate = new Date(Date.UTC(currentYear, 0, 1));
+      endDate = new Date(Date.UTC(currentYear, currentMonth, currentDay));
+    } else {
+      // 365d
+      endDate = new Date(Date.UTC(currentYear, currentMonth, currentDay));
+      startDate = new Date(endDate);
+      startDate.setUTCFullYear(startDate.getUTCFullYear() - 1);
+    }
+
+    return {
+      startDate: startDate.toISOString().split('T')[0],
+      endDate: endDate.toISOString().split('T')[0],
+    };
+  };
+
+  const handleCategoryReportClick = (categoryId: string, period: Period) => {
     const { startDate, endDate } = getDateRangeFromPeriod(period);
     setTransactionListFilters({
-        category: categoryId,
-        startDate,
-        endDate,
+      category: categoryId,
+      startDate,
+      endDate,
     });
     setActiveView('transactions');
   };

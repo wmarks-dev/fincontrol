@@ -7,7 +7,10 @@ export enum PaymentMethod {
   CASH = 'Dinheiro',
   DEBIT = 'Débito',
   CREDIT_CARD = 'Cartão de Crédito',
+  PIX = 'Pix',
 }
+
+export type Period = 'current_month' | 'previous_month' | '30d' | '90d' | 'year' | '365d';
 
 export interface Category {
   id: string;
