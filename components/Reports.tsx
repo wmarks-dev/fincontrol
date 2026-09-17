@@ -124,6 +124,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
 const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategories, onCategoryClick }) => {
   const [period, setPeriod] = useState<Period>('current_month');
+  const [dateBasis, setDateBasis] = useState<'purchase' | 'due_date'>('purchase');
   const [categoryType, setCategoryType] = useState<TransactionType>(TransactionType.EXPENSE);
   const [cardChartType, setCardChartType] = useState<'donut' | 'bar'>('donut');
 
@@ -158,17 +159,23 @@ const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategor
     monthlyTrendData,
     netWorthEvolutionData,
   } = useMemo(() => {
-    // 1. Get effective dates for all transactions (respecting customDueDate)
+    // 1. Get effective dates for all transactions
+    // In 'purchase' mode (default), expenses belong to the date the purchase happened (competência).
+    // In 'due_date' mode, credit card expenses are assigned to the bill's due date (caixa).
     const cardsById = new Map(creditCards.map((c) => [c.id, c]));
     const allEffectiveTransactions = transactions
       .map((t) => {
         let effectiveDate: Date;
         const transactionDateAsUTC = parseISODateAsUTC(t.date);
 
-        if (t.type === TransactionType.EXPENSE && t.paymentMethod === PaymentMethod.CREDIT_CARD && t.creditCardId) {
+        if (
+          dateBasis === 'due_date' &&
+          t.type === TransactionType.EXPENSE &&
+          (t.paymentMethod === PaymentMethod.CREDIT_CARD || t.creditCardId)
+        ) {
           if (t.customDueDate) {
             effectiveDate = parseISODateAsUTC(t.customDueDate);
-          } else {
+          } else if (t.creditCardId) {
             const card = cardsById.get(t.creditCardId);
             if (card && transactionDateAsUTC && !isNaN(transactionDateAsUTC.getTime())) {
               const billInfo = getBillInfoForTransaction(card, transactionDateAsUTC);
@@ -176,8 +183,11 @@ const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategor
             } else {
               effectiveDate = transactionDateAsUTC;
             }
+          } else {
+            effectiveDate = transactionDateAsUTC;
           }
         } else {
+          // Data da Compra (Competência / Padrão)
           effectiveDate = transactionDateAsUTC;
         }
         return { ...t, effectiveDate };
@@ -244,9 +254,18 @@ const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategor
 
     const formattedRange = `${sDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })} até ${eDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}`;
 
-    // 3. Transactions in period (excluding internal transfers)
+    // Helper: Identify credit card invoice payments (not income)
+    const isCreditCardBillPayment = (t: Transaction) => {
+      if (t.paymentMethod === PaymentMethod.CREDIT_CARD && t.type === TransactionType.INCOME) {
+        const desc = (t.description || '').toLowerCase();
+        return desc.includes('pagamento') || desc.includes('fatura');
+      }
+      return false;
+    };
+
+    // 3. Transactions in period (excluding internal transfers and invoice payments)
     const transactionsInPeriod = allEffectiveTransactions.filter(
-      (t) => t.category !== 'transfer' && t.effectiveDate >= sDate && t.effectiveDate <= eDate
+      (t) => t.category !== 'transfer' && !isCreditCardBillPayment(t) && t.effectiveDate >= sDate && t.effectiveDate <= eDate
     );
 
     const incomes = transactionsInPeriod.filter((t) => t.type === TransactionType.INCOME);
@@ -490,7 +509,7 @@ const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategor
       monthlyTrendData: trendData,
       netWorthEvolutionData: evolutionDataPoints,
     };
-  }, [transactions, creditCards, period, customStartDate, customEndDate, categoryType, allCategories]);
+  }, [transactions, creditCards, period, dateBasis, customStartDate, customEndDate, categoryType, allCategories]);
 
   const PeriodButton: React.FC<{ p: Period; label: string; icon?: string }> = ({ p, label, icon }) => (
     <button
@@ -533,18 +552,52 @@ const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategor
             </div>
             <p className="text-xs sm:text-sm text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
               <span>Período: <strong className="text-slate-200">{formattedDateRange}</strong></span>
+              <span className="text-slate-600">•</span>
+              <span>Base: <strong className="text-blue-400">{dateBasis === 'purchase' ? 'Data da Compra (Competência)' : 'Vencimento da Fatura (Caixa)'}</strong></span>
             </p>
           </div>
 
-          {/* Natural Period Buttons */}
-          <div className="flex items-center gap-1 bg-slate-900/80 p-1.5 rounded-xl border border-white/[0.08] overflow-x-auto max-w-full custom-scrollbar">
-            <PeriodButton p="current_month" label="Este Mês" />
-            <PeriodButton p="previous_month" label="Mês Anterior" />
-            <PeriodButton p="30d" label="30 dias" />
-            <PeriodButton p="90d" label="90 dias" />
-            <PeriodButton p="year" label="Este Ano" />
-            <PeriodButton p="365d" label="12 Meses" />
-            <PeriodButton p="custom" label="Personalizado" icon="fa-calendar-days" />
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2.5 max-w-full">
+            {/* Date Basis Toggle: Data da Compra vs Vencimento da Fatura */}
+            <div className="flex items-center bg-slate-900/80 p-1 rounded-xl border border-white/[0.08] text-xs shadow-sm">
+              <button
+                type="button"
+                onClick={() => setDateBasis('purchase')}
+                className={`px-3 py-1.5 rounded-lg font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                  dateBasis === 'purchase'
+                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/25'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+                }`}
+                title="Considera a data em que cada compra foi realizada no cartão (Recomendado)"
+              >
+                <i className="fa-solid fa-bag-shopping text-[11px]"></i>
+                <span>Data da Compra</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDateBasis('due_date')}
+                className={`px-3 py-1.5 rounded-lg font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                  dateBasis === 'due_date'
+                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/25'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+                }`}
+                title="Considera a data de vencimento da fatura do cartão"
+              >
+                <i className="fa-solid fa-file-invoice-dollar text-[11px]"></i>
+                <span>Vencimento da Fatura</span>
+              </button>
+            </div>
+
+            {/* Natural Period Buttons */}
+            <div className="flex items-center gap-1 bg-slate-900/80 p-1.5 rounded-xl border border-white/[0.08] overflow-x-auto max-w-full custom-scrollbar">
+              <PeriodButton p="current_month" label="Este Mês" />
+              <PeriodButton p="previous_month" label="Mês Anterior" />
+              <PeriodButton p="30d" label="30 dias" />
+              <PeriodButton p="90d" label="90 dias" />
+              <PeriodButton p="year" label="Este Ano" />
+              <PeriodButton p="365d" label="12 Meses" />
+              <PeriodButton p="custom" label="Personalizado" icon="fa-calendar-days" />
+            </div>
           </div>
         </div>
 
