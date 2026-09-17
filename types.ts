@@ -10,7 +10,7 @@ export enum PaymentMethod {
   PIX = 'Pix',
 }
 
-export type Period = 'current_month' | 'previous_month' | '30d' | '90d' | 'year' | '365d';
+export type Period = 'current_month' | 'previous_month' | '30d' | '90d' | 'year' | '365d' | 'custom';
 
 export interface Category {
   id: string;

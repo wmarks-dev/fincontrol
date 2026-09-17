@@ -21,7 +21,11 @@ interface ReportsProps {
   transactions: Transaction[];
   creditCards: CreditCard[];
   allCategories: Category[];
-  onCategoryClick: (categoryId: string, period: Period) => void;
+  onCategoryClick: (
+    categoryId: string,
+    period: Period,
+    customRange?: { startDate: string; endDate: string }
+  ) => void;
 }
 
 const CATEGORY_COLORS = [
@@ -29,6 +33,15 @@ const CATEGORY_COLORS = [
   '#8B5CF6', '#14B8A6', '#F43F5E', '#A855F7', '#06B6D4',
   '#EAB308', '#64748B', '#F97316', '#84CC16', '#0EA5E9'
 ];
+
+const CARD_THEME_CONFIG: Record<string, { main: string; badge: string; border: string; bg: string }> = {
+  black: { main: '#71717A', badge: 'text-zinc-300 bg-zinc-800/80 border-zinc-700', border: 'border-zinc-600/40', bg: 'bg-zinc-800/30' },
+  purple: { main: '#A855F7', badge: 'text-purple-300 bg-purple-950/80 border-purple-800', border: 'border-purple-500/40', bg: 'bg-purple-500/10' },
+  emerald: { main: '#10B981', badge: 'text-emerald-300 bg-emerald-950/80 border-emerald-800', border: 'border-emerald-500/40', bg: 'bg-emerald-500/10' },
+  blue: { main: '#3B82F6', badge: 'text-blue-300 bg-blue-950/80 border-blue-800', border: 'border-blue-500/40', bg: 'bg-blue-500/10' },
+  gold: { main: '#F59E0B', badge: 'text-amber-300 bg-amber-950/80 border-amber-800', border: 'border-amber-500/40', bg: 'bg-amber-500/10' },
+  rose: { main: '#F43F5E', badge: 'text-rose-300 bg-rose-950/80 border-rose-800', border: 'border-rose-500/40', bg: 'bg-rose-500/10' },
+};
 
 const PAYMENT_METHOD_CONFIG: { [key: string]: { label: string; icon: string; color: string; bg: string; border: string } } = {
   [PaymentMethod.CREDIT_CARD]: {
@@ -112,6 +125,17 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategories, onCategoryClick }) => {
   const [period, setPeriod] = useState<Period>('current_month');
   const [categoryType, setCategoryType] = useState<TransactionType>(TransactionType.EXPENSE);
+  const [cardChartType, setCardChartType] = useState<'donut' | 'bar'>('donut');
+
+  const [customStartDate, setCustomStartDate] = useState<string>(() => {
+    const now = new Date();
+    const firstDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    return firstDay.toISOString().split('T')[0];
+  });
+  const [customEndDate, setCustomEndDate] = useState<string>(() => {
+    const now = new Date();
+    return now.toISOString().split('T')[0];
+  });
 
   const {
     startDate,
@@ -126,6 +150,11 @@ const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategor
     dailyAverage,
     categoryChartData,
     paymentMethodData,
+    creditCardsReport,
+    activeCardsWithSpending,
+    totalCreditCardExpenses,
+    totalCreditCardCount,
+    cardBarChartData,
     monthlyTrendData,
     netWorthEvolutionData,
   } = useMemo(() => {
@@ -191,6 +220,20 @@ const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategor
     } else if (period === 'year') {
       sDate = new Date(Date.UTC(currentYear, 0, 1, 0, 0, 0));
       eDate = new Date(Date.UTC(currentYear, currentMonth, currentDay, 23, 59, 59, 999));
+    } else if (period === 'custom') {
+      const pStart = parseISODateAsUTC(customStartDate);
+      const pEnd = parseISODateAsUTC(customEndDate);
+      sDate = pStart && !isNaN(pStart.getTime())
+        ? new Date(Date.UTC(pStart.getUTCFullYear(), pStart.getUTCMonth(), pStart.getUTCDate(), 0, 0, 0))
+        : new Date(Date.UTC(currentYear, currentMonth, 1, 0, 0, 0));
+      eDate = pEnd && !isNaN(pEnd.getTime())
+        ? new Date(Date.UTC(pEnd.getUTCFullYear(), pEnd.getUTCMonth(), pEnd.getUTCDate(), 23, 59, 59, 999))
+        : new Date(Date.UTC(currentYear, currentMonth, currentDay, 23, 59, 59, 999));
+      if (sDate > eDate) {
+        const temp = sDate;
+        sDate = eDate;
+        eDate = temp;
+      }
     } else {
       // 365d
       eDate = new Date(Date.UTC(currentYear, currentMonth, currentDay, 23, 59, 59, 999));
@@ -272,6 +315,99 @@ const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategor
       })
       .sort((a, b) => b.total - a.total);
 
+    // 5.5 Credit Card Breakdown (Gastos por Cartão de Crédito)
+    const cardSpendMap = new Map<string, {
+      id: string;
+      name: string;
+      limit: number;
+      theme: string;
+      total: number;
+      count: number;
+    }>();
+
+    creditCards.forEach((c) => {
+      cardSpendMap.set(c.id, {
+        id: c.id,
+        name: c.name,
+        limit: c.limit || 0,
+        theme: c.theme || 'blue',
+        total: 0,
+        count: 0,
+      });
+    });
+
+    let unassignedCardSpend = 0;
+    let unassignedCardCount = 0;
+
+    expenses.forEach((t) => {
+      const isCard = t.paymentMethod === PaymentMethod.CREDIT_CARD || !!t.creditCardId;
+      if (isCard) {
+        if (t.creditCardId && cardSpendMap.has(t.creditCardId)) {
+          const item = cardSpendMap.get(t.creditCardId)!;
+          item.total += t.amount;
+          item.count += 1;
+        } else if (t.creditCardId) {
+          const cardObj = cardsById.get(t.creditCardId);
+          cardSpendMap.set(t.creditCardId, {
+            id: t.creditCardId,
+            name: cardObj?.name || 'Cartão não cadastrado',
+            limit: cardObj?.limit || 0,
+            theme: cardObj?.theme || 'black',
+            total: t.amount,
+            count: 1,
+          });
+        } else {
+          unassignedCardSpend += t.amount;
+          unassignedCardCount += 1;
+        }
+      }
+    });
+
+    if (unassignedCardSpend > 0) {
+      cardSpendMap.set('unassigned', {
+        id: 'unassigned',
+        name: 'Outros / Sem Cartão Vinculado',
+        limit: 0,
+        theme: 'black',
+        total: unassignedCardSpend,
+        count: unassignedCardCount,
+      });
+    }
+
+    const allCardEntries = Array.from(cardSpendMap.values());
+    const totalCreditCardExpenses = allCardEntries.reduce((acc, curr) => acc + curr.total, 0);
+    const totalCreditCardCount = allCardEntries.reduce((acc, curr) => acc + curr.count, 0);
+
+    const creditCardsReport = allCardEntries
+      .map((item, idx) => {
+        const themeConfig = CARD_THEME_CONFIG[item.theme] || CARD_THEME_CONFIG.blue;
+        const color = themeConfig?.main || CATEGORY_COLORS[idx % CATEGORY_COLORS.length];
+        const sharePercentage = totalCreditCardExpenses > 0 ? (item.total / totalCreditCardExpenses) * 100 : 0;
+        const limitUsage = item.limit > 0 ? (item.total / item.limit) * 100 : 0;
+        const avgTicket = item.count > 0 ? item.total / item.count : 0;
+
+        return {
+          ...item,
+          color,
+          themeConfig,
+          sharePercentage,
+          limitUsage,
+          avgTicket,
+        };
+      })
+      .sort((a, b) => b.total - a.total);
+
+    const activeCardsWithSpending = creditCardsReport.filter((c) => c.total > 0);
+
+    const cardBarChartData = activeCardsWithSpending.map((c) => ({
+      name: c.name.length > 14 ? c.name.slice(0, 12) + '…' : c.name,
+      fullName: c.name,
+      Gastos: c.total,
+      color: c.color,
+      compras: c.count,
+      ticket: c.avgTicket,
+    }));
+
     // 6. Monthly Cashflow (BarChart)
     const monthlyTotals: { [key: string]: { income: number; expense: number; year: number; month: number } } = {};
     transactionsInPeriod.forEach((t) => {
@@ -346,58 +482,160 @@ const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategor
       dailyAverage: avgDaily,
       categoryChartData: categoryList,
       paymentMethodData: paymentList,
+      creditCardsReport,
+      activeCardsWithSpending,
+      totalCreditCardExpenses,
+      totalCreditCardCount,
+      cardBarChartData,
       monthlyTrendData: trendData,
       netWorthEvolutionData: evolutionDataPoints,
     };
-  }, [transactions, creditCards, period, categoryType, allCategories]);
+  }, [transactions, creditCards, period, customStartDate, customEndDate, categoryType, allCategories]);
 
-  const PeriodButton: React.FC<{ p: Period; label: string }> = ({ p, label }) => (
+  const PeriodButton: React.FC<{ p: Period; label: string; icon?: string }> = ({ p, label, icon }) => (
     <button
       onClick={() => setPeriod(p)}
-      className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+      className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
         period === p
           ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/25'
           : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
       }`}
     >
-      {label}
+      {icon && <i className={`fa-solid ${icon} text-[11px]`}></i>}
+      <span>{label}</span>
     </button>
   );
 
   const handlePieClick = (data: any) => {
     if (data && data.id) {
-      onCategoryClick(data.id, period);
+      onCategoryClick(
+        data.id,
+        period,
+        period === 'custom' ? { startDate: customStartDate, endDate: customEndDate } : undefined
+      );
     }
   };
 
   return (
     <div className="space-y-6 pb-12 animate-fadeIn">
       {/* Page Header + Natural Period Filter */}
-      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 pb-2 border-b border-white/[0.06]">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              Relatórios Financeiros
-            </h1>
-            <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/30">
-              <i className="fa-solid fa-chart-line text-[10px]"></i>
-              Inteligência Financeira
-            </span>
+      <div className="flex flex-col gap-4 pb-2 border-b border-white/[0.06]">
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+                Relatórios Financeiros
+              </h1>
+              <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/30">
+                <i className="fa-solid fa-chart-line text-[10px]"></i>
+                Inteligência Financeira
+              </span>
+            </div>
+            <p className="text-xs sm:text-sm text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
+              <span>Período: <strong className="text-slate-200">{formattedDateRange}</strong></span>
+            </p>
           </div>
-          <p className="text-xs sm:text-sm text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
-            <span>Período: <strong className="text-slate-200">{formattedDateRange}</strong></span>
-          </p>
+
+          {/* Natural Period Buttons */}
+          <div className="flex items-center gap-1 bg-slate-900/80 p-1.5 rounded-xl border border-white/[0.08] overflow-x-auto max-w-full custom-scrollbar">
+            <PeriodButton p="current_month" label="Este Mês" />
+            <PeriodButton p="previous_month" label="Mês Anterior" />
+            <PeriodButton p="30d" label="30 dias" />
+            <PeriodButton p="90d" label="90 dias" />
+            <PeriodButton p="year" label="Este Ano" />
+            <PeriodButton p="365d" label="12 Meses" />
+            <PeriodButton p="custom" label="Personalizado" icon="fa-calendar-days" />
+          </div>
         </div>
 
-        {/* Natural Period Buttons */}
-        <div className="flex items-center gap-1 bg-slate-900/80 p-1.5 rounded-xl border border-white/[0.08] overflow-x-auto max-w-full custom-scrollbar">
-          <PeriodButton p="current_month" label="Este Mês" />
-          <PeriodButton p="previous_month" label="Mês Anterior" />
-          <PeriodButton p="30d" label="30 dias" />
-          <PeriodButton p="90d" label="90 dias" />
-          <PeriodButton p="year" label="Este Ano" />
-          <PeriodButton p="365d" label="12 Meses" />
-        </div>
+        {/* Custom Date Range Picker Bar (visible when period === 'custom') */}
+        {period === 'custom' && (
+          <div className="bg-slate-900/90 p-4 rounded-2xl border border-blue-500/30 shadow-xl flex flex-wrap items-center justify-between gap-3 animate-fadeIn">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-xs font-bold text-blue-400 flex items-center gap-1.5">
+                <i className="fa-solid fa-calendar-range"></i>
+                <span>Intervalo Exato:</span>
+              </span>
+
+              <div className="flex items-center gap-2">
+                <label htmlFor="custom-start-date" className="text-xs text-slate-400 font-medium">De:</label>
+                <input
+                  id="custom-start-date"
+                  type="date"
+                  value={customStartDate}
+                  onChange={(e) => setCustomStartDate(e.target.value)}
+                  className="bg-slate-800 text-white text-xs px-3 py-1.5 rounded-xl border border-white/10 focus:border-blue-500 focus:outline-none transition-colors"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label htmlFor="custom-end-date" className="text-xs text-slate-400 font-medium">Até:</label>
+                <input
+                  id="custom-end-date"
+                  type="date"
+                  value={customEndDate}
+                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  className="bg-slate-800 text-white text-xs px-3 py-1.5 rounded-xl border border-white/10 focus:border-blue-500 focus:outline-none transition-colors"
+                />
+              </div>
+            </div>
+
+            {/* Quick preset shortcuts */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] text-slate-500 mr-1">Atalhos:</span>
+              <button
+                type="button"
+                onClick={() => {
+                  const today = new Date().toISOString().split('T')[0];
+                  setCustomStartDate(today);
+                  setCustomEndDate(today);
+                }}
+                className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors border border-white/5"
+              >
+                Hoje
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const end = new Date();
+                  const start = new Date();
+                  start.setDate(start.getDate() - 7);
+                  setCustomStartDate(start.toISOString().split('T')[0]);
+                  setCustomEndDate(end.toISOString().split('T')[0]);
+                }}
+                className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors border border-white/5"
+              >
+                7 dias
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const end = new Date();
+                  const start = new Date();
+                  start.setDate(start.getDate() - 15);
+                  setCustomStartDate(start.toISOString().split('T')[0]);
+                  setCustomEndDate(end.toISOString().split('T')[0]);
+                }}
+                className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors border border-white/5"
+              >
+                15 dias
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const now = new Date();
+                  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+                  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0));
+                  setCustomStartDate(start.toISOString().split('T')[0]);
+                  setCustomEndDate(end.toISOString().split('T')[0]);
+                }}
+                className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors border border-white/5"
+              >
+                Mês Cheio
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Top Executive KPI Cards */}
@@ -672,7 +910,203 @@ const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategor
         </Card>
       </div>
 
-      {/* Row 2: Monthly Cashflow BarChart + Net Worth Evolution AreaChart */}
+      {/* Row 2: Credit Cards Spending Breakdown & Chart */}
+      <Card
+        title="Gastos por Cartão de Crédito"
+        icon="fa-credit-card"
+        headerAction={
+          <div className="flex items-center gap-3">
+            {activeCardsWithSpending.length > 0 && (
+              <div className="flex items-center bg-slate-900/70 p-1 rounded-xl border border-white/5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setCardChartType('donut')}
+                  className={`px-3 py-1 rounded-lg font-semibold transition-all flex items-center gap-1.5 ${
+                    cardChartType === 'donut'
+                      ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30 shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Visualização em Gráfico de Pizza"
+                >
+                  <i className="fa-solid fa-chart-pie text-xs"></i>
+                  <span className="hidden sm:inline">Distribuição</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCardChartType('bar')}
+                  className={`px-3 py-1 rounded-lg font-semibold transition-all flex items-center gap-1.5 ${
+                    cardChartType === 'bar'
+                      ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30 shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Visualização em Gráfico de Barras"
+                >
+                  <i className="fa-solid fa-chart-column text-xs"></i>
+                  <span className="hidden sm:inline">Comparativo</span>
+                </button>
+              </div>
+            )}
+            <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/25 tabular-nums">
+              Total: {formatCurrency(totalCreditCardExpenses)}
+            </span>
+          </div>
+        }
+      >
+        {totalCreditCardExpenses > 0 ? (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+            {/* Chart column (5 cols) */}
+            <div className="lg:col-span-5 h-64 sm:h-72 relative flex items-center justify-center">
+              {cardChartType === 'donut' ? (
+                <>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={activeCardsWithSpending}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius="58%"
+                        outerRadius="88%"
+                        paddingAngle={4}
+                        dataKey="total"
+                        stroke="none"
+                      >
+                        {activeCardsWithSpending.map((entry) => (
+                          <Cell key={`card-cell-${entry.id}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip content={<CustomTooltip />} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  {/* Center text */}
+                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-4">
+                    <span className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                      Total em Cartões
+                    </span>
+                    <span className="text-sm sm:text-base font-extrabold text-white tabular-nums">
+                      {formatCurrency(totalCreditCardExpenses)}
+                    </span>
+                    <span className="text-[10px] text-slate-400 mt-0.5">
+                      {totalCreditCardCount} compra{totalCreditCardCount === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={cardBarChartData} margin={{ top: 10, right: 10, left: -10, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" vertical={false} />
+                    <XAxis dataKey="name" stroke="#64748B" tick={{ fontSize: 11, fill: '#94A3B8' }} />
+                    <YAxis
+                      stroke="#64748B"
+                      tick={{ fontSize: 11, fill: '#94A3B8' }}
+                      tickFormatter={(v: number) => (Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(0)}k` : `${v}`)}
+                    />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Bar dataKey="Gastos" radius={[6, 6, 0, 0]} maxBarSize={48}>
+                      {cardBarChartData.map((entry, index) => (
+                        <Cell key={`cell-bar-${index}`} fill={entry.color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+
+            {/* Cards detail list (7 cols) */}
+            <div className="lg:col-span-7 space-y-3 overflow-y-auto max-h-80 custom-scrollbar pr-1">
+              {creditCardsReport.map((card) => {
+                const hasSpend = card.total > 0;
+                let limitGrad = 'from-emerald-500 to-teal-400';
+                if (card.limitUsage > 85) limitGrad = 'from-rose-500 to-red-600';
+                else if (card.limitUsage > 60) limitGrad = 'from-amber-500 to-yellow-500';
+
+                return (
+                  <div
+                    key={card.id}
+                    className={`p-3.5 rounded-xl border transition-all ${
+                      hasSpend
+                        ? 'bg-slate-800/40 border-white/[0.06] hover:border-white/15'
+                        : 'bg-slate-900/30 border-white/[0.02] opacity-60'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-xs flex-shrink-0 border"
+                          style={{
+                            backgroundColor: `${card.color}20`,
+                            borderColor: `${card.color}40`,
+                            color: card.color,
+                          }}
+                        >
+                          <i className="fa-solid fa-credit-card"></i>
+                        </div>
+                        <div className="min-w-0">
+                          <span className="font-bold text-sm text-slate-200 truncate block">
+                            {card.name}
+                          </span>
+                          <span className="text-[11px] text-slate-400">
+                            {card.count} compra{card.count === 1 ? '' : 's'} • Méd: {formatCurrency(card.avgTicket)}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="text-right flex-shrink-0">
+                        <p className="font-extrabold text-sm sm:text-base text-white tabular-nums">
+                          {formatCurrency(card.total)}
+                        </p>
+                        <span className="text-[11px] font-bold text-slate-400">
+                          {card.sharePercentage.toFixed(1)}% do total
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Limit bar if card has limit */}
+                    {card.limit > 0 ? (
+                      <div>
+                        <div className="flex justify-between items-center text-[11px] text-slate-400 mb-1 tabular-nums">
+                          <span>
+                            {card.limitUsage.toFixed(1)}% do limite ({formatCurrency(card.total)} / {formatCurrency(card.limit)})
+                          </span>
+                          <span className="text-slate-500">
+                            Disponível: {formatCurrency(Math.max(0, card.limit - card.total))}
+                          </span>
+                        </div>
+                        <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                          <div
+                            className={`h-1.5 rounded-full bg-gradient-to-r ${limitGrad} transition-all duration-500`}
+                            style={{ width: `${Math.min(card.limitUsage, 100)}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    ) : (
+                      /* Share bar if no limit set */
+                      <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className="h-1.5 rounded-full transition-all duration-500"
+                          style={{
+                            width: `${Math.min(card.sharePercentage, 100)}%`,
+                            backgroundColor: card.color,
+                          }}
+                        ></div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-center flex-col h-56 text-slate-500">
+            <div className="w-12 h-12 rounded-2xl bg-slate-800/80 flex items-center justify-center text-slate-600 mb-3">
+              <i className="fa-solid fa-credit-card text-xl"></i>
+            </div>
+            <p className="text-slate-300 text-sm font-semibold">Nenhum gasto com cartão no período.</p>
+            <p className="text-xs text-slate-500 mt-1">Nenhuma transação com cartão de crédito foi registrada para o intervalo selecionado.</p>
+          </div>
+        )}
+      </Card>
+
+      {/* Row 3: Monthly Cashflow BarChart + Net Worth Evolution AreaChart */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Monthly Cashflow BarChart */}
         <Card

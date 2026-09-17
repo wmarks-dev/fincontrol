@@ -198,7 +198,7 @@ const AppContent: React.FC = () => {
     let startDate: Date;
     let endDate: Date;
 
-    if (period === 'current_month') {
+    if (period === 'current_month' || period === 'custom') {
       startDate = new Date(Date.UTC(currentYear, currentMonth, 1));
       const lastDay = new Date(Date.UTC(currentYear, currentMonth + 1, 0)).getUTCDate();
       endDate = new Date(Date.UTC(currentYear, currentMonth, lastDay));
@@ -236,8 +236,23 @@ const AppContent: React.FC = () => {
     };
   };
 
-  const handleCategoryReportClick = (categoryId: string, period: Period) => {
-    const { startDate, endDate } = getDateRangeFromPeriod(period);
+  const handleCategoryReportClick = (
+    categoryId: string, 
+    period: Period, 
+    customRange?: { startDate: string; endDate: string }
+  ) => {
+    let startDate: string;
+    let endDate: string;
+
+    if (period === 'custom' && customRange) {
+      startDate = customRange.startDate;
+      endDate = customRange.endDate;
+    } else {
+      const range = getDateRangeFromPeriod(period);
+      startDate = range.startDate;
+      endDate = range.endDate;
+    }
+
     setTransactionListFilters({
       category: categoryId,
       startDate,
