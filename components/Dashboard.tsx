@@ -16,6 +16,8 @@ interface DashboardProps {
   onPayBill: (bill: Bill, nextDueDate: Date, customAmount?: number) => void;
   onBudgetCategoryClick: (categoryId: string) => void;
   onMonthSummaryClick: (year: number, month: number) => void;
+  onOpenCards?: () => void;
+  onOpenBills?: () => void;
 }
 
 const Card: React.FC<{title: string, children: React.ReactNode, className?: string, icon?: string, headerAction?: React.ReactNode}> = ({ title, children, className, icon, headerAction }) => (
@@ -98,6 +100,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   allCategories,
   onBudgetCategoryClick,
   onMonthSummaryClick,
+  onOpenCards,
+  onOpenBills,
 }) => {
   const [showFullHistory, setShowFullHistory] = useState(false);
   const [showValues, setShowValues] = useState(true);
@@ -224,10 +228,13 @@ const Dashboard: React.FC<DashboardProps> = ({
         const recentlyClosedBill = getMostRecentlyClosedBillInfo(card, todayUTC);
         
         let billToShow;
+        let isClosed = false;
         if (recentlyClosedBill.dueDate < todayUTC) {
             billToShow = getCurrentOpenBillInfo(card, todayUTC);
+            isClosed = false;
         } else {
             billToShow = recentlyClosedBill;
+            isClosed = true;
         }
 
         const billTransactions = transactions.filter(t => 
@@ -238,11 +245,18 @@ const Dashboard: React.FC<DashboardProps> = ({
         );
         const total = billTransactions.reduce((acc, t) => acc + t.amount, 0);
 
+        const diffTime = billToShow.dueDate.getTime() - todayUTC.getTime();
+        const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+
         return {
+            cardId: card.id,
             cardName: card.name,
+            cardColor: card.color,
             dueDate: billToShow.dueDate,
+            diffDays,
+            isClosed,
             total,
-        }
+        };
     }).sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
   }, [creditCards, transactions]);
 
@@ -657,52 +671,77 @@ const Dashboard: React.FC<DashboardProps> = ({
       
       {/* Bottom Row: Monthly Table, Cards and Bills */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <Card title="Resumo Mensal" icon="fa-chart-simple" className="lg:col-span-1">
+          {/* Card 1: Resumo Mensal */}
+          <Card
+            title="Resumo Mensal"
+            icon="fa-chart-simple"
+            className="lg:col-span-1"
+            headerAction={
+              <span className="text-[11px] font-semibold text-slate-400 bg-slate-800/80 px-2.5 py-0.5 rounded-full border border-white/5">
+                {monthlySummary.length} meses
+              </span>
+            }
+          >
             <div className="flex flex-col h-96">
                 <div className="flex-grow overflow-y-auto pr-1 custom-scrollbar">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left">
-                        <thead className="border-b border-slate-700/60 text-xs font-semibold uppercase tracking-wider text-slate-400">
-                          <tr>
-                            <th className="pb-3 px-2">Mês/Ano</th>
-                            <th className="pb-3 px-2 text-right">Receitas</th>
-                            <th className="pb-3 px-2 text-right">Despesas</th>
-                            <th className="pb-3 px-2 text-right">Saldo</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-800 text-xs sm:text-sm">
-                          {monthlySummary.map(item => {
-                            const balance = item.income - item.expense;
-                            const monthName = new Date(Date.UTC(item.year, item.month)).toLocaleString('pt-BR', { month: 'long', timeZone: 'UTC' });
-                            const displayName = `${monthName.charAt(0).toUpperCase() + monthName.slice(1)} ${item.year}`;
-                            return (
-                              <tr 
-                                key={`${item.year}-${item.month}`} 
-                                className="hover:bg-slate-800/60 cursor-pointer transition-colors"
-                                onClick={() => onMonthSummaryClick(item.year, item.month)}
-                                role="button"
-                                aria-label={`Ver transações de ${displayName}`}
-                               >
-                                <td className="py-3 px-2 font-medium text-slate-200">{displayName}</td>
-                                <td className="py-3 px-2 text-right text-emerald-400 font-medium tabular-nums">{formatCurrency(item.income)}</td>
-                                <td className="py-3 px-2 text-right text-rose-400 font-medium tabular-nums">{formatCurrency(item.expense)}</td>
-                                <td className={`py-3 px-2 text-right font-bold tabular-nums ${balance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                  {formatCurrency(balance)}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                      {monthlySummary.length === 0 && (
-                         <p className="text-center text-slate-500 py-12 text-sm">
-                           {showFullHistory ? "Nenhum dado para exibir no resumo mensal." : "Nenhum dado para este mês ou futuros."}
-                         </p>
-                      )}
-                    </div>
+                    <table className="w-full text-left">
+                      <thead className="border-b border-slate-700/60 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                        <tr>
+                          <th className="pb-2.5 pl-1 pr-1.5">Mês</th>
+                          <th className="pb-2.5 px-1.5 text-right">Receitas</th>
+                          <th className="pb-2.5 px-1.5 text-right">Despesas</th>
+                          <th className="pb-2.5 pl-1.5 pr-1 text-right">Saldo</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/80 text-xs sm:text-sm">
+                        {monthlySummary.map(item => {
+                          const balance = item.income - item.expense;
+                          const monthDate = new Date(Date.UTC(item.year, item.month));
+                          const monthLong = monthDate.toLocaleString('pt-BR', { month: 'long', timeZone: 'UTC' });
+                          const displayName = `${monthLong.charAt(0).toUpperCase() + monthLong.slice(1)} ${item.year}`;
+                          return (
+                            <tr 
+                              key={`${item.year}-${item.month}`} 
+                              className="hover:bg-slate-800/80 cursor-pointer transition-colors group"
+                              onClick={() => onMonthSummaryClick(item.year, item.month)}
+                              role="button"
+                              aria-label={`Ver transações de ${displayName}`}
+                              title={`Clique para ver as transações de ${displayName}`}
+                             >
+                              <td className="py-2.5 pl-1 pr-1.5">
+                                <div className="flex flex-col">
+                                  <span className="font-bold text-slate-200 capitalize text-xs sm:text-sm group-hover:text-blue-400 transition-colors">
+                                    {monthLong}
+                                  </span>
+                                  <span className="text-[10px] text-slate-500 font-medium leading-tight">
+                                    {item.year}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-1.5 text-right text-emerald-400 font-medium tabular-nums whitespace-nowrap text-xs sm:text-sm">
+                                {formatCurrency(item.income)}
+                              </td>
+                              <td className="py-2.5 px-1.5 text-right text-rose-400 font-medium tabular-nums whitespace-nowrap text-xs sm:text-sm">
+                                {formatCurrency(item.expense)}
+                              </td>
+                              <td className={`py-2.5 pl-1.5 pr-1 text-right font-extrabold tabular-nums whitespace-nowrap text-xs sm:text-sm ${
+                                balance >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                              }`}>
+                                {formatCurrency(balance)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    {monthlySummary.length === 0 && (
+                       <p className="text-center text-slate-500 py-12 text-sm">
+                         {showFullHistory ? "Nenhum dado para exibir no resumo mensal." : "Nenhum dado para este mês ou futuros."}
+                       </p>
+                    )}
                 </div>
                 {hasPastMonths && (
-                  <div className="flex-shrink-0 pt-4 border-t border-slate-800/80">
+                  <div className="flex-shrink-0 pt-3 border-t border-slate-800/80">
                     <button
                       onClick={() => setShowFullHistory(!showFullHistory)}
                       className="w-full text-center py-2 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition-colors text-xs font-semibold border border-white/[0.05]"
@@ -715,20 +754,70 @@ const Dashboard: React.FC<DashboardProps> = ({
             </div>
           </Card>
 
-          <Card title="Próximas Faturas" icon="fa-credit-card" className="lg:col-span-1">
+          {/* Card 2: Próximas Faturas */}
+          <Card
+            title="Próximas Faturas"
+            icon="fa-credit-card"
+            className="lg:col-span-1"
+            headerAction={
+              onOpenCards ? (
+                <button
+                  onClick={onOpenCards}
+                  className="text-xs font-semibold text-amber-400 hover:text-amber-300 transition-colors flex items-center gap-1"
+                  title="Gerenciar todos os cartões de crédito"
+                >
+                  <span>Ver cartões</span>
+                  <i className="fa-solid fa-chevron-right text-[10px]"></i>
+                </button>
+              ) : undefined
+            }
+          >
               <div className="space-y-3 max-h-96 overflow-y-auto pr-1 custom-scrollbar">
                   {upcomingCreditCardBills.filter(b => b.total > 0).map(bill => (
-                      <div key={bill.cardName} className="flex justify-between items-center bg-slate-800/50 p-3.5 rounded-xl border border-white/[0.05] hover:border-amber-500/30 transition-colors">
-                          <div className="flex items-center gap-3">
-                              <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/25 text-amber-400 flex items-center justify-center text-sm">
-                                <i className="fa-solid fa-credit-card"></i>
+                      <div
+                        key={bill.cardName}
+                        className={`p-3.5 rounded-xl border border-white/[0.05] bg-slate-800/50 hover:bg-slate-800/80 hover:border-amber-500/30 transition-all duration-200 ${
+                          onOpenCards ? 'cursor-pointer group' : ''
+                        }`}
+                        onClick={onOpenCards}
+                        title={onOpenCards ? "Clique para gerenciar cartões" : undefined}
+                      >
+                          <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                  <div className="w-8 h-8 rounded-lg bg-amber-500/15 border border-amber-500/25 text-amber-400 flex items-center justify-center text-xs flex-shrink-0">
+                                    <i className="fa-solid fa-credit-card"></i>
+                                  </div>
+                                  <p className="font-bold text-sm text-slate-100 truncate group-hover:text-amber-300 transition-colors" title={bill.cardName}>
+                                    {bill.cardName}
+                                  </p>
                               </div>
-                              <div>
-                                  <p className="font-semibold text-sm text-slate-200">{bill.cardName}</p>
-                                  <p className="text-xs text-slate-400">Vence: {bill.dueDate.toLocaleDateString('pt-BR', { timeZone: 'UTC' })}</p>
-                              </div>
+                              <p className="font-extrabold text-amber-400 tabular-nums text-sm sm:text-base flex-shrink-0">
+                                {formatCurrency(bill.total)}
+                              </p>
                           </div>
-                          <p className="font-extrabold text-amber-400 tabular-nums text-sm sm:text-base">{formatCurrency(bill.total)}</p>
+
+                          <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-white/[0.04] text-xs">
+                            <span className="text-slate-400 flex items-center gap-1.5 truncate">
+                              <i className="fa-regular fa-calendar text-[10px] text-slate-500 flex-shrink-0"></i>
+                              <span>Vence: {bill.dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</span>
+                            </span>
+
+                            <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md flex-shrink-0 ${
+                              bill.diffDays < 0
+                                ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                                : bill.diffDays === 0
+                                ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 animate-pulse'
+                                : bill.diffDays <= 5
+                                ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                : 'bg-slate-700/40 text-slate-400 border border-white/5'
+                            }`}>
+                              {bill.diffDays < 0
+                                ? `Venceu há ${Math.abs(bill.diffDays)}d`
+                                : bill.diffDays === 0
+                                ? 'Vence Hoje!'
+                                : `em ${bill.diffDays} dias`}
+                            </span>
+                          </div>
                       </div>
                   ))}
                   {upcomingCreditCardBills.filter(b => b.total > 0).length === 0 && (
@@ -743,98 +832,129 @@ const Dashboard: React.FC<DashboardProps> = ({
               </div>
           </Card>
 
+          {/* Card 3: Contas a Pagar */}
           <Card
             title="Contas a Pagar"
             icon="fa-file-invoice-dollar"
             className="lg:col-span-1"
             headerAction={
-              overdueCount > 0 ? (
-                <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse flex items-center gap-1.5 shadow-sm shadow-rose-900/30">
-                  <i className="fa-solid fa-triangle-exclamation text-[10px]"></i>
-                  <span>{overdueCount} vencida{overdueCount > 1 ? 's' : ''}</span>
-                </span>
-              ) : undefined
+              <div className="flex items-center gap-2">
+                {overdueCount > 0 && (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse flex items-center gap-1.5 shadow-sm shadow-rose-900/30">
+                    <i className="fa-solid fa-triangle-exclamation text-[10px]"></i>
+                    <span>{overdueCount} vencida{overdueCount > 1 ? 's' : ''}</span>
+                  </span>
+                )}
+                {onOpenBills && (
+                  <button
+                    onClick={onOpenBills}
+                    className="text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1"
+                    title="Gerenciar todas as contas a pagar"
+                  >
+                    <span>Gerenciar</span>
+                    <i className="fa-solid fa-chevron-right text-[10px]"></i>
+                  </button>
+                )}
+              </div>
             }
           >
               <div className="space-y-3 max-h-96 overflow-y-auto pr-1 custom-scrollbar">
                   {allBillsToDisplay.map((item) => (
                       <div
                         key={item.id}
-                        className={`flex justify-between items-center p-3.5 rounded-xl border transition-colors ${
+                        className={`p-3.5 rounded-xl border transition-all duration-200 ${
                           item.status === 'overdue'
-                            ? 'bg-rose-950/20 border-rose-500/40 hover:border-rose-500/60'
+                            ? 'bg-rose-950/20 border-rose-500/30 hover:border-rose-500/50'
                             : item.status === 'due_today'
-                            ? 'bg-amber-950/20 border-amber-500/40 hover:border-amber-500/60'
+                            ? 'bg-amber-950/20 border-amber-500/30 hover:border-amber-500/50'
                             : 'bg-slate-800/50 border-white/[0.05] hover:border-blue-500/30'
                         }`}
                       >
-                          <div className="flex items-center gap-3 flex-1 min-w-0">
-                              <div
-                                className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm flex-shrink-0 border ${
-                                  item.status === 'overdue'
-                                    ? 'bg-rose-500/20 border-rose-500/40 text-rose-400'
-                                    : item.status === 'due_today'
-                                    ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
-                                    : 'bg-blue-500/15 border-blue-500/25 text-blue-400'
-                                }`}
-                              >
-                                <i className={`fa-solid ${
-                                  item.status === 'overdue'
-                                    ? 'fa-triangle-exclamation animate-pulse'
-                                    : item.status === 'due_today'
-                                    ? 'fa-bolt animate-pulse'
-                                    : 'fa-receipt'
-                                }`}></i>
+                          {/* Row 1: Name + Icon (left) and Amount + Real Badge (right) */}
+                          <div className="flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                  <div
+                                    className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs flex-shrink-0 border ${
+                                      item.status === 'overdue'
+                                        ? 'bg-rose-500/20 border-rose-500/40 text-rose-400'
+                                        : item.status === 'due_today'
+                                        ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                                        : 'bg-blue-500/15 border-blue-500/25 text-blue-400'
+                                    }`}
+                                  >
+                                    <i className={`fa-solid ${
+                                      item.status === 'overdue'
+                                        ? 'fa-triangle-exclamation'
+                                        : item.status === 'due_today'
+                                        ? 'fa-bolt'
+                                        : 'fa-receipt'
+                                    }`}></i>
+                                  </div>
+                                  <p className="font-bold text-sm text-slate-100 truncate" title={item.name}>
+                                    {item.name}
+                                  </p>
                               </div>
-                              <div className="min-w-0">
-                                  <p className="font-semibold text-sm text-slate-200 truncate">{item.name}</p>
-                                  {item.status === 'overdue' ? (
-                                    <p className="text-xs text-rose-400 font-bold flex items-center gap-1">
-                                      <span>Venceu há {item.diffDays} dia(s)</span>
-                                      <span className="text-rose-500/60">•</span>
-                                      <span className="font-normal text-rose-300/80">{item.dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'UTC' })}</span>
-                                    </p>
-                                  ) : item.status === 'due_today' ? (
-                                    <p className="text-xs text-amber-300 font-bold">Vence Hoje!</p>
-                                  ) : (
-                                    <p className="text-xs text-slate-400">
-                                      Vence: {item.dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'UTC' })}
-                                      {item.status === 'due_soon' && (
-                                        <span className="text-amber-400 font-medium ml-1">(em {item.diffDays} dias)</span>
-                                      )}
-                                    </p>
-                                  )}
+
+                              <div className="text-right flex-shrink-0 flex items-center gap-1.5">
+                                 <span className={`font-extrabold tabular-nums text-sm sm:text-base ${
+                                   item.status === 'overdue' ? 'text-rose-400' : 'text-slate-100'
+                                 }`}>
+                                   {formatCurrency(item.amount)}
+                                 </span>
+                                 {item.hasRealAmount && (
+                                   <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-bold border border-blue-500/30">
+                                     Real
+                                   </span>
+                                 )}
                               </div>
                           </div>
-                          <div className="flex items-center gap-3 ml-2 flex-shrink-0">
-                             <div className="text-right">
-                               <p className={`font-extrabold tabular-nums text-sm ${
-                                 item.status === 'overdue' ? 'text-rose-300' : 'text-slate-200'
-                               }`}>
-                                 {formatCurrency(item.amount)}
-                               </p>
-                               {item.hasRealAmount && (
-                                 <span className="text-[9px] text-blue-400 block font-semibold leading-none">Real</span>
-                               )}
-                             </div>
-                             {item.isPaid ? (
-                                <span className="px-2.5 py-1 bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-bold">
-                                    Pago
-                                </span>
-                             ) : (
-                                <button
-                                  onClick={() => onPayBill(item.bill, item.dueDate, item.amount)}
-                                  className={`px-3 py-1 text-white rounded-lg transition-all text-xs font-semibold shadow-md ${
-                                    item.status === 'overdue'
-                                      ? 'bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 shadow-rose-600/25'
-                                      : item.status === 'due_today'
-                                      ? 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 shadow-amber-500/25'
-                                      : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-blue-600/20'
-                                  }`}
-                                >
-                                    Pagar
-                                </button>
-                             )}
+
+                          {/* Row 2: Status / Due Date (left) and Pay Button (right) */}
+                          <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-white/[0.04]">
+                              <div className="min-w-0 flex-1">
+                                  {item.status === 'overdue' ? (
+                                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded-md border border-rose-500/20 truncate max-w-full">
+                                      <i className="fa-solid fa-clock-rotate-left text-[10px] flex-shrink-0"></i>
+                                      <span className="truncate">Venceu há {item.diffDays}d ({item.dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'UTC' })})</span>
+                                    </span>
+                                  ) : item.status === 'due_today' ? (
+                                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded-md border border-amber-500/30">
+                                      <i className="fa-solid fa-bolt text-[10px]"></i>
+                                      <span>Vence Hoje!</span>
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 text-[11px] text-slate-400 truncate">
+                                      <i className="fa-regular fa-calendar text-[10px] text-slate-500 flex-shrink-0"></i>
+                                      <span>Venc: {item.dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'UTC' })}</span>
+                                      {item.status === 'due_soon' && (
+                                        <span className="text-amber-400 font-medium ml-0.5">({item.diffDays}d)</span>
+                                      )}
+                                    </span>
+                                  )}
+                              </div>
+
+                              <div className="flex-shrink-0">
+                                 {item.isPaid ? (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-bold">
+                                        <i className="fa-solid fa-check text-[10px]"></i>
+                                        Pago
+                                    </span>
+                                 ) : (
+                                    <button
+                                      onClick={() => onPayBill(item.bill, item.dueDate, item.amount)}
+                                      className={`px-3 py-1 rounded-lg transition-all duration-200 text-xs font-bold shadow-sm flex items-center gap-1.5 ${
+                                        item.status === 'overdue'
+                                          ? 'bg-rose-500 hover:bg-rose-400 text-white shadow-rose-600/30'
+                                          : item.status === 'due_today'
+                                          ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold shadow-amber-500/30'
+                                          : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-600/20'
+                                      }`}
+                                    >
+                                        <span>Pagar</span>
+                                        <i className="fa-solid fa-arrow-right text-[10px]"></i>
+                                    </button>
+                                 )}
+                              </div>
                           </div>
                       </div>
                   ))}
