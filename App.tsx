@@ -26,6 +26,7 @@ import AddGoalModal from './components/AddGoalModal';
 import CategoryManagement from './components/CategoryManagement';
 import AddCategoryModal from './components/AddCategoryModal';
 import ImportDataModal from './components/ImportDataModal';
+import UserAvatar from './components/UserAvatar';
 
 
 type View = 'dashboard' | 'transactions' | 'cards' | 'recurring' | 'savings' | 'loans' | 'reports' | 'bills' | 'budget' | 'goals' | 'settings';
@@ -406,13 +407,22 @@ const AppContent: React.FC = () => {
               >
                 <i className="fa-solid fa-chevron-left"></i>
               </button>
-              <div className="w-14 h-14 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center text-white text-xl font-bold shadow-lg shadow-blue-500/25 border border-white/20">
-                {currentUser?.displayName?.charAt(0).toUpperCase()}
-              </div>
-              <div className="text-center">
-                <h1 className="text-base font-bold text-white leading-tight truncate max-w-[170px]">
-                  Olá, {currentUser?.displayName}
+              <UserAvatar
+                photoURL={currentUser?.photoURL}
+                name={currentUser?.displayName}
+                email={currentUser?.email}
+                size="lg"
+                className="shadow-lg ring-2 ring-blue-500/25"
+              />
+              <div className="text-center w-full px-1">
+                <h1 className="text-base font-bold text-white leading-tight truncate" title={currentUser?.displayName || currentUser?.email || 'Usuário'}>
+                  Olá, {currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Usuário'}
                 </h1>
+                {currentUser?.email && (
+                  <p className="text-[11px] text-slate-400 truncate mt-0.5" title={currentUser.email}>
+                    {currentUser.email}
+                  </p>
+                )}
                 <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 mt-1.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                   <span>SQLite Local</span>
@@ -429,10 +439,17 @@ const AppContent: React.FC = () => {
               >
                 <i className="fa-solid fa-chevron-right transition-transform group-hover:translate-x-0.5"></i>
               </button>
-              <div className="relative group">
-                <div className="w-10 h-10 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center text-white text-sm font-bold shadow-md shadow-blue-500/25 border border-white/20">
-                  {currentUser?.displayName?.charAt(0).toUpperCase()}
-                </div>
+              <div
+                className="relative group cursor-pointer"
+                title={`${currentUser?.displayName || 'Usuário'}${currentUser?.email ? ` (${currentUser.email})` : ''}`}
+                onClick={() => handleNavClick('settings')}
+              >
+                <UserAvatar
+                  photoURL={currentUser?.photoURL}
+                  name={currentUser?.displayName}
+                  email={currentUser?.email}
+                  size="md"
+                />
                 <span
                   className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-slate-900 animate-pulse"
                   title="SQLite Conectado"
@@ -482,18 +499,27 @@ const AppContent: React.FC = () => {
 
       {/* Mobile Sticky Top Header */}
       <header className="md:hidden sticky top-0 z-30 bg-slate-900/90 backdrop-blur-xl border-b border-white/[0.08] px-4 py-3 flex items-center justify-between shadow-md">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center text-white text-sm font-bold shadow-md shadow-blue-500/20 border border-white/20">
-            {currentUser?.displayName?.charAt(0).toUpperCase()}
-          </div>
-          <div>
+        <div
+          className="flex items-center gap-2.5 cursor-pointer max-w-[65%]"
+          onClick={() => handleNavClick('settings')}
+          title="Ver perfil nos Ajustes"
+        >
+          <UserAvatar
+            photoURL={currentUser?.photoURL}
+            name={currentUser?.displayName}
+            email={currentUser?.email}
+            size="sm"
+          />
+          <div className="min-w-0">
             <div className="flex items-center gap-1.5">
-              <h1 className="text-sm font-bold text-white leading-tight">
-                Olá, {currentUser?.displayName?.split(' ')[0]}
+              <h1 className="text-sm font-bold text-white leading-tight truncate">
+                Olá, {currentUser?.displayName?.split(' ')[0] || currentUser?.email?.split('@')[0] || 'Usuário'}
               </h1>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse flex-shrink-0"></span>
             </div>
-            <p className="text-[10px] text-slate-400 font-medium">FinControl SQLite</p>
+            <p className="text-[10px] text-slate-400 font-medium truncate">
+              {currentUser?.email || 'FinControl SQLite'}
+            </p>
           </div>
         </div>
 
@@ -631,18 +657,29 @@ const AppContent: React.FC = () => {
 
             {/* Drawer Header */}
             <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-400 flex items-center justify-center text-sm">
-                  <i className="fa-solid fa-layer-group"></i>
-                </div>
-                <div>
-                  <h3 className="font-bold text-white text-base">Módulos & Ferramentas</h3>
-                  <p className="text-xs text-slate-400">Acesse todas as áreas do FinControl</p>
+              <div
+                className="flex items-center gap-3 min-w-0 cursor-pointer group"
+                onClick={() => handleNavClick('settings')}
+                title="Ver perfil nos Ajustes"
+              >
+                <UserAvatar
+                  photoURL={currentUser?.photoURL}
+                  name={currentUser?.displayName}
+                  email={currentUser?.email}
+                  size="md"
+                />
+                <div className="min-w-0">
+                  <h3 className="font-bold text-white text-sm truncate group-hover:text-blue-400 transition-colors">
+                    {currentUser?.displayName || 'Minha Conta'}
+                  </h3>
+                  <p className="text-xs text-slate-400 truncate">
+                    {currentUser?.email || 'FinControl SQLite'}
+                  </p>
                 </div>
               </div>
               <button
                 onClick={() => setIsMobileMenuOpen(false)}
-                className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors flex items-center justify-center text-sm border border-white/5"
+                className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors flex items-center justify-center text-sm border border-white/5 flex-shrink-0"
               >
                 <i className="fa-solid fa-xmark"></i>
               </button>

@@ -1,6 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { Category } from '../types';
 import { useData } from '../contexts/DataContext';
+import { useUser } from '../contexts/UserContext';
+import UserAvatar from './UserAvatar';
 
 interface CategoryManagementProps {
     customCategories: Category[];
@@ -37,6 +39,7 @@ const CategoryManagement: React.FC<CategoryManagementProps> = ({
     onDeleteCategory,
     onOpenImport,
 }) => {
+    const { currentUser, logout } = useUser();
     const {
         transactions,
         recurringTransactions,
@@ -51,11 +54,20 @@ const CategoryManagement: React.FC<CategoryManagementProps> = ({
         restoreBackup,
     } = useData();
 
-    // Feedback state
+    // Feedback & Copy state
     const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+    const [copiedField, setCopiedField] = useState<string | null>(null);
     const [isExportingJson, setIsExportingJson] = useState(false);
     const [isExportingSqlite, setIsExportingSqlite] = useState(false);
     const [isRestoring, setIsRestoring] = useState(false);
+
+    const isGoogle = currentUser?.providerData?.some((p) => p?.providerId === 'google.com');
+
+    const handleCopy = (text: string, fieldName: string) => {
+        navigator.clipboard.writeText(text);
+        setCopiedField(fieldName);
+        setTimeout(() => setCopiedField(null), 2500);
+    };
 
     // Modal state for restore confirmation
     const [previewModal, setPreviewModal] = useState<BackupPreview | null>(null);
@@ -222,6 +234,122 @@ const CategoryManagement: React.FC<CategoryManagementProps> = ({
                     </button>
                 </div>
             )}
+
+            {/* Section 0: User Profile & Connected Account */}
+            <div className="bg-slate-800/80 backdrop-blur-xl border border-slate-700/60 rounded-2xl p-6 sm:p-7 shadow-xl">
+                <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
+                    <div className="flex items-start sm:items-center gap-4 sm:gap-5 min-w-0">
+                        <div className="relative flex-shrink-0">
+                            <UserAvatar
+                                photoURL={currentUser?.photoURL}
+                                name={currentUser?.displayName}
+                                email={currentUser?.email}
+                                size="xl"
+                                className="shadow-xl ring-2 ring-blue-500/30"
+                            />
+                            {isGoogle && (
+                                <div
+                                    className="absolute -bottom-1 -right-1 w-6 h-6 rounded-lg bg-white shadow-md flex items-center justify-center border border-slate-200"
+                                    title="Autenticado via Google"
+                                >
+                                    <i className="fa-brands fa-google text-[#4285F4] text-xs"></i>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="space-y-2 min-w-0 flex-1">
+                            <div className="flex items-center gap-2.5 flex-wrap">
+                                <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight truncate">
+                                    {currentUser?.displayName || 'Usuário FinControl'}
+                                </h2>
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex-shrink-0">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                                    Sessão Ativa
+                                </span>
+                                {currentUser?.emailVerified && (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-sky-500/15 text-sky-400 border border-sky-500/30 flex-shrink-0">
+                                        <i className="fa-solid fa-circle-check text-[10px]"></i>
+                                        E-mail Verificado
+                                    </span>
+                                )}
+                            </div>
+
+                            {/* Email Display & Copy */}
+                            <div className="flex items-center gap-2 text-slate-300 flex-wrap">
+                                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-slate-900/60 border border-white/5 max-w-full">
+                                    <i className="fa-solid fa-envelope text-blue-400 text-xs flex-shrink-0"></i>
+                                    <span className="text-xs sm:text-sm font-medium text-slate-200 truncate select-all">
+                                        {currentUser?.email || 'Nenhum e-mail vinculado'}
+                                    </span>
+                                </div>
+                                {currentUser?.email && (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleCopy(currentUser.email!, 'email')}
+                                        className="text-xs text-slate-300 hover:text-white px-2.5 py-1 rounded-lg bg-slate-700/60 hover:bg-slate-700 transition-colors flex items-center gap-1.5 border border-white/5 flex-shrink-0"
+                                        title="Copiar endereço de e-mail"
+                                    >
+                                        <i className={`fa-solid ${copiedField === 'email' ? 'fa-check text-emerald-400' : 'fa-copy text-slate-400'}`}></i>
+                                        <span>{copiedField === 'email' ? 'Copiado!' : 'Copiar e-mail'}</span>
+                                    </button>
+                                )}
+                            </div>
+
+                            {/* Account badges */}
+                            <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-slate-400">
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900/50 border border-white/5 font-medium">
+                                    {isGoogle ? (
+                                        <>
+                                            <i className="fa-brands fa-google text-red-400"></i>
+                                            <span>Login com Google</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <i className="fa-solid fa-key text-amber-400"></i>
+                                            <span>Login por E-mail / Senha</span>
+                                        </>
+                                    )}
+                                </span>
+
+                                {currentUser?.metadata?.creationTime && (
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900/50 border border-white/5 font-medium text-slate-400">
+                                        <i className="fa-regular fa-calendar text-slate-400"></i>
+                                        <span>
+                                            Conta criada em {new Date(currentUser.metadata.creationTime).toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' })}
+                                        </span>
+                                    </span>
+                                )}
+
+                                {currentUser?.uid && (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleCopy(currentUser.uid, 'uid')}
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900/50 border border-white/5 font-mono text-[11px] text-slate-400 hover:text-slate-300 hover:border-white/10 transition-colors"
+                                        title="Clique para copiar o UID da conta"
+                                    >
+                                        <i className="fa-solid fa-fingerprint text-slate-500"></i>
+                                        <span className="truncate max-w-[110px]">UID: {currentUser.uid}</span>
+                                        <i className={`fa-solid ${copiedField === 'uid' ? 'fa-check text-emerald-400' : 'fa-copy text-[10px] text-slate-500'}`}></i>
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Right side: Logout button */}
+                    <div className="w-full lg:w-auto pt-4 lg:pt-0 border-t lg:border-t-0 border-slate-700/60 flex items-center justify-end flex-shrink-0">
+                        <button
+                            type="button"
+                            onClick={logout}
+                            className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 border border-rose-500/20 font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 transition-colors shadow-sm"
+                            title="Encerrar sessão atual no FinControl"
+                        >
+                            <i className="fa-solid fa-sign-out-alt"></i>
+                            <span>Sair da Conta</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
 
             {/* Section 1: SQLite Database & Backup */}
             <div className="bg-slate-800/80 backdrop-blur-xl border border-slate-700/60 rounded-2xl p-6 sm:p-7 shadow-xl">
