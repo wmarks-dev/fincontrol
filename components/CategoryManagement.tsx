@@ -52,6 +52,7 @@ const CategoryManagement: React.FC<CategoryManagementProps> = ({
         exportBackup,
         downloadSqlite,
         restoreBackup,
+        resetAllData,
     } = useData();
 
     // Feedback & Copy state
@@ -60,6 +61,11 @@ const CategoryManagement: React.FC<CategoryManagementProps> = ({
     const [isExportingJson, setIsExportingJson] = useState(false);
     const [isExportingSqlite, setIsExportingSqlite] = useState(false);
     const [isRestoring, setIsRestoring] = useState(false);
+
+    // Reset account data state
+    const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+    const [resetConfirmText, setResetConfirmText] = useState('');
+    const [isResetting, setIsResetting] = useState(false);
 
     const isGoogle = currentUser?.providerData?.some((p) => p?.providerId === 'google.com');
 
@@ -73,6 +79,23 @@ const CategoryManagement: React.FC<CategoryManagementProps> = ({
     const [previewModal, setPreviewModal] = useState<BackupPreview | null>(null);
 
     const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+    // Reset account data handler
+    const handleResetAllData = async () => {
+        if (resetConfirmText.trim().toUpperCase() !== 'RESETAR') return;
+        try {
+            setIsResetting(true);
+            await resetAllData();
+            showFeedback('success', 'Todos os dados da conta foram resetados com sucesso! O painel foi reinicializado.');
+            setIsResetModalOpen(false);
+            setResetConfirmText('');
+        } catch (error: any) {
+            console.error('Erro ao resetar dados:', error);
+            showFeedback('error', error.message || 'Falha ao resetar os dados da conta.');
+        } finally {
+            setIsResetting(false);
+        }
+    };
 
     // Auto-clear notification
     const showFeedback = (type: 'success' | 'error', text: string) => {
@@ -552,6 +575,41 @@ const CategoryManagement: React.FC<CategoryManagementProps> = ({
                 </div>
             </div>
 
+            {/* Section 3: Danger Zone - Reset All Account Data */}
+            <div className="bg-rose-950/20 backdrop-blur-xl border border-rose-500/30 rounded-2xl p-6 sm:p-7 shadow-xl">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
+                    <div className="flex items-start gap-4">
+                        <div className="w-12 h-12 rounded-xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400 text-xl shadow-inner flex-shrink-0">
+                            <i className="fa-solid fa-triangle-exclamation"></i>
+                        </div>
+                        <div>
+                            <div className="flex items-center gap-2.5 flex-wrap">
+                                <h2 className="text-lg font-bold text-white">Zona de Perigo</h2>
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse"></span>
+                                    Ação Irreversível
+                                </span>
+                            </div>
+                            <p className="text-xs sm:text-sm text-slate-300 mt-1 max-w-2xl">
+                                Deseja recomeçar do zero? Esta ação apagará permanentemente todas as receitas, despesas, faturas, cartões, contas a pagar, metas e orçamentos vinculados a esta conta.
+                            </p>
+                        </div>
+                    </div>
+
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setResetConfirmText('');
+                            setIsResetModalOpen(true);
+                        }}
+                        className="flex-shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-xl bg-rose-500/15 hover:bg-rose-600/30 text-rose-300 hover:text-rose-100 border border-rose-500/40 font-semibold text-xs sm:text-sm transition-all duration-200 active:scale-95 shadow-lg shadow-rose-950/40"
+                    >
+                        <i className="fa-solid fa-trash-can text-xs"></i>
+                        <span>Resetar Todos os Dados</span>
+                    </button>
+                </div>
+            </div>
+
             {/* Confirmation & Preview Modal for Restore */}
             {previewModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fadeIn">
@@ -675,6 +733,129 @@ const CategoryManagement: React.FC<CategoryManagementProps> = ({
                                     <>
                                         <i className="fa-solid fa-triangle-exclamation text-xs"></i>
                                         <span>Confirmar e Restaurar Dados</span>
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal de Confirmação de Reset Total */}
+            {isResetModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+                    <div className="bg-slate-800 border border-rose-500/40 rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden animate-scaleUp">
+                        {/* Modal Header */}
+                        <div className="p-5 border-b border-slate-700/80 flex items-center justify-between bg-rose-950/30">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 text-lg">
+                                    <i className="fa-solid fa-triangle-exclamation"></i>
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-white text-base">Zerar Dados da Conta</h3>
+                                    <p className="text-xs text-rose-300/80">Esta ação é irreversível e definitiva</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => !isResetting && setIsResetModalOpen(false)}
+                                disabled={isResetting}
+                                className="text-slate-400 hover:text-white p-1 rounded-lg transition-colors disabled:opacity-50"
+                            >
+                                <i className="fa-solid fa-xmark text-lg"></i>
+                            </button>
+                        </div>
+
+                        {/* Modal Body */}
+                        <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto custom-scrollbar">
+                            <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-4 text-xs text-rose-200 space-y-2">
+                                <p className="font-semibold text-rose-100 flex items-center gap-2">
+                                    <i className="fa-solid fa-radiation"></i>
+                                    Atenção: Os seguintes dados serão excluídos permanentemente:
+                                </p>
+                                <ul className="list-disc list-inside space-y-1 text-slate-300 pl-1">
+                                    <li>Todas as <strong>transações</strong> (receitas, despesas e parcelamentos)</li>
+                                    <li>Todos os <strong>cartões de crédito</strong> e fechamentos de fatura</li>
+                                    <li>Todas as <strong>contas a pagar</strong> e registros de quitação</li>
+                                    <li>Todas as <strong>metas financeiras</strong> e cofrinhos/poupança</li>
+                                    <li>Todos os <strong>empréstimos</strong> e pagamentos</li>
+                                    <li>Todos os <strong>orçamentos</strong> e <strong>categorias personalizadas</strong></li>
+                                </ul>
+                                <p className="text-[11px] text-slate-400 pt-1 border-t border-rose-500/20">
+                                    Sua conta de login ({currentUser?.email || 'atual'}) continuará ativa para novos lançamentos.
+                                </p>
+                            </div>
+
+                            {/* Safety Backup Prompt */}
+                            <div className="bg-slate-900/60 border border-slate-700/60 rounded-xl p-3.5 space-y-2">
+                                <div className="flex items-center gap-2 text-amber-400 font-medium text-xs">
+                                    <i className="fa-solid fa-shield-halved"></i>
+                                    <span>Quer se precaver antes de apagar?</span>
+                                </div>
+                                <p className="text-xs text-slate-400">
+                                    Recomendamos fortemente baixar uma cópia de segurança antes de prosseguir com a exclusão total.
+                                </p>
+                                <button
+                                    type="button"
+                                    onClick={handleExportJson}
+                                    disabled={isExportingJson || isResetting}
+                                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600/60 font-semibold text-xs transition-colors"
+                                >
+                                    {isExportingJson ? (
+                                        <>
+                                            <i className="fa-solid fa-spinner fa-spin text-xs"></i>
+                                            <span>Gerando Backup...</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <i className="fa-solid fa-download text-xs text-blue-400"></i>
+                                            <span>Baixar Backup de Segurança (.json)</span>
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+
+                            {/* Confirmation Input Guard */}
+                            <div className="space-y-2 pt-1">
+                                <label className="block text-xs font-semibold text-slate-300">
+                                    Para confirmar a exclusão, digite <span className="text-rose-400 font-bold font-mono">RESETAR</span> no campo abaixo:
+                                </label>
+                                <input
+                                    type="text"
+                                    value={resetConfirmText}
+                                    onChange={(e) => setResetConfirmText(e.target.value)}
+                                    placeholder="Digite RESETAR para confirmar"
+                                    disabled={isResetting}
+                                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-slate-700 focus:border-rose-500 focus:ring-1 focus:ring-rose-500 text-white font-mono text-center tracking-wider text-sm placeholder:text-slate-600 placeholder:tracking-normal transition-colors"
+                                    autoFocus
+                                />
+                            </div>
+                        </div>
+
+                        {/* Modal Footer */}
+                        <div className="p-4 border-t border-slate-700/80 bg-slate-900/50 flex justify-end gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setIsResetModalOpen(false)}
+                                disabled={isResetting}
+                                className="px-4 py-2 rounded-xl text-slate-300 hover:text-white bg-slate-700/50 hover:bg-slate-700 font-medium text-xs sm:text-sm transition-colors disabled:opacity-50"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleResetAllData}
+                                disabled={resetConfirmText.trim().toUpperCase() !== 'RESETAR' || isResetting}
+                                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs sm:text-sm shadow-lg shadow-rose-600/30 transition-all duration-200 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-rose-600"
+                            >
+                                {isResetting ? (
+                                    <>
+                                        <i className="fa-solid fa-spinner fa-spin text-xs"></i>
+                                        <span>Apagando dados...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <i className="fa-solid fa-trash-can text-xs"></i>
+                                        <span>Confirmar e Apagar Tudo</span>
                                     </>
                                 )}
                             </button>

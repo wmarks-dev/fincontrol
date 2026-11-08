@@ -15,6 +15,12 @@ import {
     GoalContribution,
     Category,
     CardMonthlyClosing,
+    SalaryConfig,
+    SalaryMonthlyRecord,
+    TaxTableConfig,
+    SalaryItemizedEntry,
+    SalaryThirteenthConfig,
+    SalaryVacationConfig,
 } from '../types';
 import { CATEGORIES } from '../constants';
 import { parseISODateAsUTC } from '../utils/dateUtils';
@@ -37,6 +43,12 @@ export interface DataContextType {
     goalContributions: GoalContribution[];
     customCategories: Category[];
     allCategories: Category[];
+    salaryConfig: SalaryConfig | null;
+    salaryMonthlyRecords: SalaryMonthlyRecord[];
+    salaryTaxTables: TaxTableConfig[];
+    salaryItemizedEntries: SalaryItemizedEntry[];
+    salaryThirteenthConfigs: SalaryThirteenthConfig[];
+    salaryVacationConfigs: SalaryVacationConfig[];
 
     // Async CRUD Methods
     addTransaction: (transactions: Omit<Transaction, 'id'>[]) => Promise<void>;
@@ -51,7 +63,8 @@ export interface DataContextType {
     setCardMonthlyClosing: (cardId: string, year: number, month: number, closingDate: string) => Promise<void>;
     removeCardMonthlyClosing: (id: string) => Promise<void>;
     handleAddSavingsTransaction: (data: Omit<SavingsTransaction, 'id' | 'date'> & { goalId?: string }) => Promise<void>;
-    addLoan: (loanData: Omit<Loan, 'id' | 'paidAmount' | 'status'>) => Promise<void>;
+    addLoan: (loanData: Omit<Loan, 'id' | 'paidAmount' | 'status'> & { createTransaction?: boolean }) => Promise<void>;
+    deleteLoan: (loanId: string) => Promise<void>;
     registerLoanPayment: (loanId: string, paymentAmount: number, paymentDate: string) => Promise<void>;
     addBill: (billData: Omit<Bill, 'id' | 'status'>) => Promise<void>;
     updateBill: (updatedBill: Bill) => Promise<void>;
@@ -69,10 +82,30 @@ export interface DataContextType {
     updateCategory: (updatedCategory: Category) => Promise<void>;
     deleteCategory: (categoryId: string) => Promise<void>;
 
+    // Salary Management
+    updateSalaryConfig: (config: Partial<SalaryConfig>) => Promise<void>;
+    saveSalaryMonthlyRecord: (record: Partial<SalaryMonthlyRecord> & { year: number; month: number }) => Promise<void>;
+    saveTaxTable: (tableConfig: Partial<TaxTableConfig> & { year: number }) => Promise<void>;
+    resetTaxTable: (year: number) => Promise<void>;
+    saveSalaryItem: (
+        item: Partial<SalaryItemizedEntry> & {
+            year: number;
+            month: number;
+            type: 'earning' | 'deduction';
+            name: string;
+            amount: number;
+        }
+    ) => Promise<void>;
+    deleteSalaryItem: (itemId: string) => Promise<void>;
+    saveThirteenthConfig: (config: Partial<SalaryThirteenthConfig> & { year: number }) => Promise<void>;
+    saveVacationConfig: (config: Partial<SalaryVacationConfig> & { year: number }) => Promise<void>;
+    deleteVacationConfig: (configId: string) => Promise<void>;
+
     // Backup & Restore
     exportBackup: () => Promise<void>;
     downloadSqlite: () => Promise<void>;
     restoreBackup: (backup: any) => Promise<RestoreResponse>;
+    resetAllData: () => Promise<void>;
     refreshData: () => Promise<void>;
 
     pendingBillPayment: { billId: string; year: number; month: number } | null;
@@ -100,6 +133,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [financialGoals, setFinancialGoals] = useState<FinancialGoal[]>([]);
     const [goalContributions, setGoalContributions] = useState<GoalContribution[]>([]);
     const [customCategories, setCustomCategories] = useState<Category[]>([]);
+    const [salaryConfig, setSalaryConfig] = useState<SalaryConfig | null>(null);
+    const [salaryMonthlyRecords, setSalaryMonthlyRecords] = useState<SalaryMonthlyRecord[]>([]);
+    const [salaryTaxTables, setSalaryTaxTables] = useState<TaxTableConfig[]>([]);
+    const [salaryItemizedEntries, setSalaryItemizedEntries] = useState<SalaryItemizedEntry[]>([]);
+    const [salaryThirteenthConfigs, setSalaryThirteenthConfigs] = useState<SalaryThirteenthConfig[]>([]);
+    const [salaryVacationConfigs, setSalaryVacationConfigs] = useState<SalaryVacationConfig[]>([]);
 
     const [pendingBillPayment, setPendingBillPayment] = useState<{ billId: string; year: number; month: number } | null>(null);
 
@@ -123,6 +162,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setFinancialGoals([]);
             setGoalContributions([]);
             setCustomCategories([]);
+            setSalaryConfig(null);
+            setSalaryMonthlyRecords([]);
+            setSalaryTaxTables([]);
+            setSalaryItemizedEntries([]);
+            setSalaryThirteenthConfigs([]);
+            setSalaryVacationConfigs([]);
             return;
         }
 
@@ -142,6 +187,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setFinancialGoals(data.financialGoals);
             setGoalContributions(data.goalContributions);
             setCustomCategories(data.customCategories);
+            setSalaryConfig(data.salaryConfig || null);
+            setSalaryMonthlyRecords(data.salaryMonthlyRecords || []);
+            setSalaryTaxTables(data.salaryTaxTables || []);
+            setSalaryItemizedEntries(data.salaryItemizedEntries || []);
+            setSalaryThirteenthConfigs(data.salaryThirteenthConfigs || []);
+            setSalaryVacationConfigs(data.salaryVacationConfigs || []);
         } catch (error) {
             console.error('Erro ao buscar dados do SQLite local:', error);
         }
@@ -281,9 +332,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         await refreshData();
     };
 
-    const addLoan = async (data: Omit<Loan, 'id' | 'paidAmount' | 'status'>) => {
+    const addLoan = async (data: Omit<Loan, 'id' | 'paidAmount' | 'status'> & { createTransaction?: boolean }) => {
         if (!userId) return;
         await api.addLoan(userId, data);
+        await refreshData();
+    };
+
+    const deleteLoan = async (loanId: string) => {
+        if (!userId) return;
+        await api.deleteLoan(userId, loanId);
         await refreshData();
     };
 
@@ -383,6 +440,108 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         await refreshData();
     };
 
+    const updateSalaryConfig = async (config: Partial<SalaryConfig>) => {
+        if (!userId) return;
+        const res = await api.updateSalaryConfig(userId, config);
+        setSalaryConfig(res.config);
+    };
+
+    const saveSalaryMonthlyRecord = async (record: Partial<SalaryMonthlyRecord> & { year: number; month: number }) => {
+        if (!userId) return;
+        const res = await api.saveSalaryMonthlyRecord(userId, record);
+        setSalaryMonthlyRecords(prev => {
+            const idx = prev.findIndex(r => r.year === record.year && r.month === record.month);
+            if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = res.record;
+                return next;
+            }
+            return [...prev, res.record];
+        });
+    };
+
+    const saveTaxTable = async (tableConfig: Partial<TaxTableConfig> & { year: number }) => {
+        if (!userId) return;
+        const res = await api.saveTaxTable(userId, tableConfig);
+        setSalaryTaxTables(prev => {
+            const idx = prev.findIndex(t => t.year === res.taxTable.year);
+            if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = res.taxTable;
+                return next;
+            }
+            return [...prev, res.taxTable];
+        });
+    };
+
+    const resetTaxTable = async (year: number) => {
+        if (!userId) return;
+        await api.resetTaxTable(userId, year);
+        setSalaryTaxTables(prev => prev.filter(t => t.year !== year));
+    };
+
+    const saveSalaryItem = async (
+        item: Partial<SalaryItemizedEntry> & {
+            year: number;
+            month: number;
+            type: 'earning' | 'deduction';
+            name: string;
+            amount: number;
+        }
+    ) => {
+        if (!userId) return;
+        const res = await api.saveSalaryItem(userId, item);
+        setSalaryItemizedEntries(prev => {
+            const idx = prev.findIndex(i => i.id === res.item.id);
+            if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = res.item;
+                return next;
+            }
+            return [...prev, res.item];
+        });
+    };
+
+    const deleteSalaryItem = async (itemId: string) => {
+        if (!userId) return;
+        await api.deleteSalaryItem(userId, itemId);
+        setSalaryItemizedEntries(prev => prev.filter(i => i.id !== itemId));
+    };
+
+    const saveThirteenthConfig = async (config: Partial<SalaryThirteenthConfig> & { year: number }) => {
+        if (!userId) return;
+        const res = await api.saveThirteenthConfig(userId, config);
+        setSalaryThirteenthConfigs(prev => {
+            const idx = prev.findIndex(c => c.year === res.config.year);
+            if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = res.config;
+                return next;
+            }
+            return [...prev, res.config];
+        });
+    };
+
+    const saveVacationConfig = async (config: Partial<SalaryVacationConfig> & { year: number }) => {
+        if (!userId) return;
+        const res = await api.saveVacationConfig(userId, config);
+        setSalaryVacationConfigs(prev => {
+            const idx = prev.findIndex(c => c.id === res.config.id);
+            if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = res.config;
+                return next;
+            }
+            return [...prev, res.config];
+        });
+    };
+
+    const deleteVacationConfig = async (configId: string) => {
+        if (!userId) return;
+        await api.deleteVacationConfig(userId, configId);
+        setSalaryVacationConfigs(prev => prev.filter(c => c.id !== configId));
+    };
+
     const exportBackup = async () => {
         if (!userId) throw new Error('Usuário não autenticado');
         await api.downloadBackupJson(userId);
@@ -398,6 +557,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const res = await api.restoreBackup(userId, backup);
         await refreshData();
         return res;
+    };
+
+    const resetAllData = async () => {
+        if (!userId) throw new Error('Usuário não autenticado');
+        await api.resetAllData(userId);
+        await refreshData();
     };
 
     const value: DataContextType = {
@@ -416,6 +581,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         goalContributions,
         customCategories,
         allCategories,
+        salaryConfig,
+        salaryMonthlyRecords,
+        salaryTaxTables,
+        salaryItemizedEntries,
+        salaryThirteenthConfigs,
+        salaryVacationConfigs,
         addTransaction,
         updateTransaction,
         deleteTransaction,
@@ -429,6 +600,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         removeCardMonthlyClosing,
         handleAddSavingsTransaction,
         addLoan,
+        deleteLoan,
         registerLoanPayment,
         addBill,
         updateBill,
@@ -445,9 +617,19 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         addCategory,
         updateCategory,
         deleteCategory,
+        updateSalaryConfig,
+        saveSalaryMonthlyRecord,
+        saveTaxTable,
+        resetTaxTable,
+        saveSalaryItem,
+        deleteSalaryItem,
+        saveThirteenthConfig,
+        saveVacationConfig,
+        deleteVacationConfig,
         exportBackup,
         downloadSqlite,
         restoreBackup,
+        resetAllData,
         refreshData,
         pendingBillPayment,
         setPendingBillPayment,

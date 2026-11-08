@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Transaction, CreditCard, TransactionType, SavingsTransaction, SavingsTransactionType, PaymentMethod, Bill, BillPayment, BillMonthlyAmount, Budget, FinancialGoal, Category } from '../types';
-import { getBillInfoForTransaction, getCurrentOpenBillInfo, parseISODateAsUTC, getMostRecentlyClosedBillInfo } from '../utils/dateUtils';
+import { Transaction, CreditCard, TransactionType, SavingsTransaction, SavingsTransactionType, PaymentMethod, Bill, BillPayment, BillMonthlyAmount, Budget, FinancialGoal, Category, CardMonthlyClosing } from '../types';
+import { getBillInfoForTransaction, getCurrentOpenBillInfo, parseISODateAsUTC, getMostRecentlyClosedBillInfo, isTransactionInBill, getEffectiveDueDate } from '../utils/dateUtils';
 import { useUser } from '../contexts/UserContext';
 
 interface DashboardProps {
@@ -13,11 +13,13 @@ interface DashboardProps {
   budgets: Budget[];
   financialGoals: FinancialGoal[];
   allCategories: Category[];
+  cardMonthlyClosings?: CardMonthlyClosing[];
   onPayBill: (bill: Bill, nextDueDate: Date, customAmount?: number) => void;
   onBudgetCategoryClick: (categoryId: string) => void;
   onMonthSummaryClick: (year: number, month: number) => void;
   onOpenCards?: () => void;
   onOpenBills?: () => void;
+  onOpenForecast?: () => void;
 }
 
 const Card: React.FC<{title: string, children: React.ReactNode, className?: string, icon?: string, headerAction?: React.ReactNode}> = ({ title, children, className, icon, headerAction }) => (
@@ -98,10 +100,12 @@ const Dashboard: React.FC<DashboardProps> = ({
   budgets,
   financialGoals,
   allCategories,
+  cardMonthlyClosings = [],
   onBudgetCategoryClick,
   onMonthSummaryClick,
   onOpenCards,
   onOpenBills,
+  onOpenForecast,
 }) => {
   const [showFullHistory, setShowFullHistory] = useState(false);
   const [showValues, setShowValues] = useState(true);
@@ -115,12 +119,12 @@ const Dashboard: React.FC<DashboardProps> = ({
   const { 
     netWorth, 
     accountBalance, 
-    savingsBalance,
+    savingsBalance, 
     monthlySummary, 
     hasPastMonths, 
     currentMonthSummary 
   } = useMemo(() => {
-    const cardsById = new Map(creditCards.map(c => [c.id, c]));
+    const cardsById = new Map<string, CreditCard>(creditCards.map(c => [c.id, c]));
     const localToday = new Date();
     const endOfTodayUTC = new Date(Date.UTC(localToday.getFullYear(), localToday.getMonth(), localToday.getDate(), 23, 59, 59, 999));
     
@@ -128,11 +132,10 @@ const Dashboard: React.FC<DashboardProps> = ({
         let effectiveDate: Date;
         const transactionDateAsUTC = parseISODateAsUTC(t.date);
 
-        if (t.type === TransactionType.EXPENSE && t.paymentMethod === PaymentMethod.CREDIT_CARD && t.creditCardId) {
+        if (t.type === TransactionType.EXPENSE && (t.paymentMethod === PaymentMethod.CREDIT_CARD || t.creditCardId) && t.creditCardId) {
             const card = cardsById.get(t.creditCardId);
             if (card && transactionDateAsUTC && !isNaN(transactionDateAsUTC.getTime())) {
-                const billInfo = getBillInfoForTransaction(card, transactionDateAsUTC);
-                effectiveDate = billInfo.dueDate;
+                effectiveDate = getEffectiveDueDate(t, card, cardMonthlyClosings);
             } else {
                 effectiveDate = transactionDateAsUTC;
             }
@@ -218,19 +221,19 @@ const Dashboard: React.FC<DashboardProps> = ({
         currentMonthSummary: currentMonthData
     };
 
-  }, [transactions, creditCards, savingsTransactions, showFullHistory]);
+  }, [transactions, creditCards, savingsTransactions, showFullHistory, cardMonthlyClosings]);
 
   const upcomingCreditCardBills = useMemo(() => {
     const now = new Date();
     const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 
     return creditCards.map(card => {
-        const recentlyClosedBill = getMostRecentlyClosedBillInfo(card, todayUTC);
+        const recentlyClosedBill = getMostRecentlyClosedBillInfo(card, todayUTC, cardMonthlyClosings);
         
         let billToShow;
         let isClosed = false;
         if (recentlyClosedBill.dueDate < todayUTC) {
-            billToShow = getCurrentOpenBillInfo(card, todayUTC);
+            billToShow = getCurrentOpenBillInfo(card, todayUTC, cardMonthlyClosings);
             isClosed = false;
         } else {
             billToShow = recentlyClosedBill;
@@ -238,10 +241,8 @@ const Dashboard: React.FC<DashboardProps> = ({
         }
 
         const billTransactions = transactions.filter(t => 
-            t.creditCardId === card.id &&
             t.type === TransactionType.EXPENSE &&
-            parseISODateAsUTC(t.date) >= billToShow.startDate &&
-            parseISODateAsUTC(t.date) <= billToShow.endDate
+            isTransactionInBill(t, card, billToShow)
         );
         const total = billTransactions.reduce((acc, t) => acc + t.amount, 0);
 
@@ -258,7 +259,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             total,
         };
     }).sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
-  }, [creditCards, transactions]);
+  }, [creditCards, transactions, cardMonthlyClosings]);
 
   const { allBillsToDisplay, overdueCount } = useMemo(() => {
     const now = new Date();
@@ -460,7 +461,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     const currentYear = now.getUTCFullYear();
     const currentMonth = now.getUTCMonth();
     
-    const cardsById = new Map(creditCards.map(c => [c.id, c]));
+    const cardsById = new Map<string, CreditCard>(creditCards.map(c => [c.id, c]));
 
     const activeBudgets = budgets.filter(b => b.year === currentYear && b.month === currentMonth);
 
@@ -476,10 +477,10 @@ const Dashboard: React.FC<DashboardProps> = ({
         let effectiveDate: Date;
         const transactionDateAsUTC = parseISODateAsUTC(t.date);
 
-        if (t.paymentMethod === PaymentMethod.CREDIT_CARD && t.creditCardId) {
+        if ((t.paymentMethod === PaymentMethod.CREDIT_CARD || t.creditCardId) && t.creditCardId) {
             const card = cardsById.get(t.creditCardId);
-            if (card) {
-                effectiveDate = getBillInfoForTransaction(card, transactionDateAsUTC).dueDate;
+            if (card && transactionDateAsUTC && !isNaN(transactionDateAsUTC.getTime())) {
+                effectiveDate = getEffectiveDueDate(t, card, cardMonthlyClosings);
             } else {
                 effectiveDate = transactionDateAsUTC;
             }
@@ -512,7 +513,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         overallProgress: totalBudgeted > 0 ? Math.min((totalSpent / totalBudgeted) * 100, 100) : 0,
     }
 
-  }, [budgets, transactions, creditCards, allCategories]);
+  }, [budgets, transactions, creditCards, allCategories, cardMonthlyClosings]);
 
   const goalsSummary = useMemo(() => {
       const activeGoals = financialGoals.filter(g => g.status === 'active');
@@ -578,7 +579,42 @@ const Dashboard: React.FC<DashboardProps> = ({
           showValues={showValues}
         />
       </div>
-      
+
+      {/* Quick Forecast Banner */}
+      {onOpenForecast && (
+        <div
+          onClick={onOpenForecast}
+          className="cursor-pointer group glass-card p-4 sm:p-5 rounded-2xl border border-violet-500/25 bg-gradient-to-r from-violet-950/30 via-slate-900/60 to-indigo-950/30 hover:border-violet-500/50 hover:shadow-xl hover:shadow-violet-500/10 transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+        >
+          <div className="flex items-center gap-3.5 min-w-0">
+            <div className="w-11 h-11 rounded-2xl bg-violet-500/20 text-violet-300 border border-violet-500/30 flex items-center justify-center text-base flex-shrink-0 group-hover:scale-105 transition-transform shadow-md shadow-violet-500/20">
+              <i className="fa-solid fa-wand-magic-sparkles"></i>
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-violet-400">
+                  Inteligência Preditiva
+                </span>
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-violet-500/20 text-violet-300 border border-violet-500/30">
+                  Novo
+                </span>
+              </div>
+              <h3 className="text-sm sm:text-base font-extrabold text-white group-hover:text-violet-200 transition-colors">
+                Projeção de Saldo & Simulador de Fluxo de Caixa
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Saiba quanto terá na conta nos próximos 30, 60 ou 90 dias e simule compras futuras com segurança.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 text-xs font-bold text-violet-400 group-hover:text-violet-300 flex-shrink-0">
+            <span>Acessar Projeção</span>
+            <i className="fa-solid fa-arrow-right text-xs transition-transform group-hover:translate-x-1"></i>
+          </div>
+        </div>
+      )}
+
       {/* Middle Section: Budget & Goals */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {budgetSummary && (

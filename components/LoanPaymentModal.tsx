@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Loan } from '../types';
+import { getTodayLocalDate } from '../utils/dateUtils';
 
 interface LoanPaymentModalProps {
     loan: Loan;
@@ -10,7 +11,7 @@ interface LoanPaymentModalProps {
 
 const LoanPaymentModal: React.FC<LoanPaymentModalProps> = ({ loan, onClose, onSave, onError }) => {
     const [amount, setAmount] = useState('');
-    const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+    const [date, setDate] = useState(getTodayLocalDate());
 
     const remainingAmount = loan.initialAmount - loan.paidAmount;
 

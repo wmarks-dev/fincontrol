@@ -1,8 +1,8 @@
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { DataProvider, useData } from './contexts/DataContext';
 import { UserProvider, useUser } from './contexts/UserContext';
-import { Transaction, Category, TransactionType, Bill, Budget, FinancialGoal, Loan, SavingsTransactionType, Period } from './types';
+import { Transaction, Category, TransactionType, PaymentMethod, Bill, Budget, FinancialGoal, Loan, SavingsTransactionType, Period } from './types';
 import Dashboard from './components/Dashboard';
 import TransactionList from './components/TransactionList';
 import AddTransactionModal from './components/AddTransactionModal';
@@ -27,9 +27,13 @@ import CategoryManagement from './components/CategoryManagement';
 import AddCategoryModal from './components/AddCategoryModal';
 import ImportDataModal from './components/ImportDataModal';
 import UserAvatar from './components/UserAvatar';
+import NotificationCenter from './components/NotificationCenter';
+import CashFlowForecast from './components/CashFlowForecast';
+import SalaryManagement from './components/SalaryManagement';
+import { calculateFinancialAlerts } from './utils/financialRadar';
+import { parseISODateAsUTC, getEffectiveDueDate } from './utils/dateUtils';
 
-
-type View = 'dashboard' | 'transactions' | 'cards' | 'recurring' | 'savings' | 'loans' | 'reports' | 'bills' | 'budget' | 'goals' | 'settings';
+type View = 'dashboard' | 'salary' | 'forecast' | 'transactions' | 'cards' | 'recurring' | 'savings' | 'loans' | 'reports' | 'bills' | 'budget' | 'goals' | 'settings';
 
 type TransactionFilters = {
   category: string;
@@ -296,6 +300,125 @@ const AppContent: React.FC = () => {
     setIsMobileMenuOpen(false); // Close menu on navigation
   };
 
+  const radarAlerts = useMemo(() => {
+    return calculateFinancialAlerts({
+      bills: data.bills,
+      billPayments: data.billPayments,
+      billMonthlyAmounts: data.billMonthlyAmounts,
+      creditCards: data.creditCards,
+      cardMonthlyClosings: data.cardMonthlyClosings,
+      transactions: data.transactions,
+      budgets: data.budgets,
+      financialGoals: data.financialGoals,
+      allCategories: data.allCategories,
+    });
+  }, [
+    data.bills,
+    data.billPayments,
+    data.billMonthlyAmounts,
+    data.creditCards,
+    data.cardMonthlyClosings,
+    data.transactions,
+    data.budgets,
+    data.financialGoals,
+    data.allCategories,
+  ]);
+
+  const { accountBalance, savingsBalance } = useMemo(() => {
+    const cardsById = new Map(data.creditCards.map((c) => [c.id, c]));
+    const localToday = new Date();
+    const endOfTodayUTC = new Date(
+      Date.UTC(localToday.getFullYear(), localToday.getMonth(), localToday.getDate(), 23, 59, 59, 999)
+    );
+
+    const effectiveTransactions = data.transactions
+      .map((t) => {
+        let effectiveDate: Date;
+        const transactionDateAsUTC = parseISODateAsUTC(t.date);
+
+        if (
+          t.type === TransactionType.EXPENSE &&
+          (t.paymentMethod === PaymentMethod.CREDIT_CARD || t.creditCardId) &&
+          t.creditCardId
+        ) {
+          const card = cardsById.get(t.creditCardId);
+          if (card && transactionDateAsUTC && !isNaN(transactionDateAsUTC.getTime())) {
+            effectiveDate = getEffectiveDueDate(t, card, data.cardMonthlyClosings);
+          } else {
+            effectiveDate = transactionDateAsUTC;
+          }
+        } else {
+          effectiveDate = transactionDateAsUTC;
+        }
+        return { ...t, effectiveDate };
+      })
+      .filter((t) => t.category !== 'transfer');
+
+    const transactionsForBalance = effectiveTransactions.filter(
+      (t) => t.effectiveDate && !isNaN(t.effectiveDate.getTime()) && t.effectiveDate <= endOfTodayUTC
+    );
+
+    const totalIncomeUpToToday = transactionsForBalance
+      .filter((t) => t.type === TransactionType.INCOME)
+      .reduce((acc, t) => acc + t.amount, 0);
+
+    const totalExpenseUpToToday = transactionsForBalance
+      .filter((t) => t.type === TransactionType.EXPENSE)
+      .reduce((acc, t) => acc + t.amount, 0);
+
+    const calculatedNetWorth = totalIncomeUpToToday - totalExpenseUpToToday;
+
+    const savingsTransactionsUpToToday = data.savingsTransactions.filter((st) => {
+      const transactionDate = parseISODateAsUTC(st.date);
+      return transactionDate && !isNaN(transactionDate.getTime()) && transactionDate <= endOfTodayUTC;
+    });
+
+    const calculatedSavingsBalance = savingsTransactionsUpToToday.reduce((acc, st) => {
+      return st.type === SavingsTransactionType.DEPOSIT ? acc + st.amount : acc - st.amount;
+    }, 0);
+
+    const calculatedAccountBalance = calculatedNetWorth - calculatedSavingsBalance;
+
+    return {
+      accountBalance: calculatedAccountBalance,
+      savingsBalance: calculatedSavingsBalance,
+    };
+  }, [
+    data.transactions,
+    data.creditCards,
+    data.cardMonthlyClosings,
+    data.savingsTransactions,
+  ]);
+
+  const handleRadarNavigate = (view: 'bills' | 'cards' | 'budget' | 'goals', metadata?: any) => {
+    handleNavClick(view);
+    if (view === 'bills' && metadata?.billId && metadata?.dueDate) {
+      const targetBill = data.bills.find((b) => b.id === metadata.billId);
+      if (targetBill) {
+        handlePayBill(targetBill, metadata.dueDate);
+      }
+    }
+  };
+
+  const getViewTitle = (view: View): string => {
+    switch (view) {
+      case 'dashboard': return 'Dashboard';
+      case 'salary': return 'Salário & Holerite';
+      case 'forecast': return 'Projeção de Saldo & Fluxo de Caixa';
+      case 'reports': return 'Relatórios Financeiros';
+      case 'transactions': return 'Transações';
+      case 'budget': return 'Orçamentos Planejados';
+      case 'bills': return 'Contas Fixas & Vencimentos';
+      case 'goals': return 'Metas Financeiras';
+      case 'cards': return 'Cartões de Crédito';
+      case 'savings': return 'Poupança & Caixinhas';
+      case 'loans': return 'Empréstimos';
+      case 'recurring': return 'Transações Recorrentes';
+      case 'settings': return 'Ajustes & Banco de Dados';
+      default: return 'Visão Geral';
+    }
+  };
+
 
   const renderView = () => {
     switch(activeView) {
@@ -309,20 +432,77 @@ const AppContent: React.FC = () => {
           billMonthlyAmounts={data.billMonthlyAmounts}
           budgets={data.budgets}
           financialGoals={data.financialGoals}
+          cardMonthlyClosings={data.cardMonthlyClosings}
           onPayBill={handlePayBill}
           allCategories={data.allCategories}
           onBudgetCategoryClick={handleDashboardCategoryClick}
           onMonthSummaryClick={handleMonthSummaryClick}
           onOpenCards={() => handleNavClick('cards')}
           onOpenBills={() => handleNavClick('bills')}
+          onOpenForecast={() => handleNavClick('forecast')}
         />
       );
-      case 'reports': return <Reports transactions={data.transactions} creditCards={data.creditCards} allCategories={data.allCategories} onCategoryClick={handleCategoryReportClick} />;
+      case 'salary': return (
+        <SalaryManagement
+          salaryConfig={data.salaryConfig}
+          salaryMonthlyRecords={data.salaryMonthlyRecords}
+          salaryTaxTables={data.salaryTaxTables}
+          salaryItemizedEntries={data.salaryItemizedEntries}
+          salaryThirteenthConfigs={data.salaryThirteenthConfigs}
+          salaryVacationConfigs={data.salaryVacationConfigs}
+          onUpdateSalaryConfig={data.updateSalaryConfig}
+          onSaveSalaryMonthlyRecord={data.saveSalaryMonthlyRecord}
+          onSaveTaxTable={data.saveTaxTable}
+          onResetTaxTable={data.resetTaxTable}
+          onSaveSalaryItem={data.saveSalaryItem}
+          onDeleteSalaryItem={data.deleteSalaryItem}
+          onSaveThirteenthConfig={data.saveThirteenthConfig}
+          onSaveVacationConfig={data.saveVacationConfig}
+          onDeleteVacationConfig={data.deleteVacationConfig}
+          onAddTransaction={data.addTransaction}
+          transactions={data.transactions}
+          onError={showError}
+        />
+      );
+      case 'forecast': return (
+        <CashFlowForecast
+          currentAccountBalance={accountBalance}
+          currentSavingsBalance={savingsBalance}
+          transactions={data.transactions}
+          creditCards={data.creditCards}
+          cardMonthlyClosings={data.cardMonthlyClosings}
+          bills={data.bills}
+          billPayments={data.billPayments}
+          billMonthlyAmounts={data.billMonthlyAmounts}
+          recurringTransactions={data.recurringTransactions}
+          allCategories={data.allCategories}
+          salaryConfig={data.salaryConfig}
+          salaryMonthlyRecords={data.salaryMonthlyRecords}
+          salaryThirteenthConfigs={data.salaryThirteenthConfigs}
+          salaryVacationConfigs={data.salaryVacationConfigs}
+          salaryTaxTables={data.salaryTaxTables}
+          salaryItemizedEntries={data.salaryItemizedEntries}
+          onOpenAddTransaction={() => setIsModalOpen(true)}
+          onOpenBills={() => handleNavClick('bills')}
+          onOpenCards={() => handleNavClick('cards')}
+        />
+      );
+      case 'reports': return <Reports transactions={data.transactions} creditCards={data.creditCards} allCategories={data.allCategories} cardMonthlyClosings={data.cardMonthlyClosings} onCategoryClick={handleCategoryReportClick} />;
       case 'transactions': return <TransactionList transactions={data.transactions} onEdit={handleEditTransaction} onDelete={handleDeleteTransaction} allCategories={data.allCategories} initialFilters={transactionListFilters} onFiltersApplied={() => setTransactionListFilters(null)} onOpenImport={() => setImportModalProps({ isOpen: true, initialCardId: null })} />;
       case 'cards': return <CardsManagement creditCards={data.creditCards} onAddCard={data.addCreditCard} onUpdateCard={data.updateCreditCard} transactions={data.transactions} onDeleteCard={handleDeleteCreditCard} allCategories={data.allCategories} onOpenImport={(cardId) => setImportModalProps({ isOpen: true, initialCardId: cardId || null })} />;
       case 'recurring': return <RecurringManagement recurringTransactions={data.recurringTransactions} onCancel={handleCancelRecurringTransaction} allCategories={data.allCategories} />;
       case 'savings': return <SavingsManagement savingsTransactions={data.savingsTransactions} onOpenModal={(type) => setSavingsModalProps({ isOpen: true, type })} />;
-      case 'loans': return <LoansManagement loans={data.loans} loanPayments={data.loanPayments} onAddLoan={() => setAddLoanModalOpen(true)} onRegisterPayment={(loan) => setLoanPaymentModalProps({ isOpen: true, loan })}/>;
+      case 'loans': return (
+        <LoansManagement
+          loans={data.loans}
+          loanPayments={data.loanPayments}
+          transactions={data.transactions}
+          creditCards={data.creditCards}
+          onAddLoan={() => setAddLoanModalOpen(true)}
+          onRegisterPayment={(loan) => setLoanPaymentModalProps({ isOpen: true, loan })}
+          onDeleteLoan={data.deleteLoan}
+        />
+      );
       case 'bills': return (
         <BillsManagement
           bills={data.bills}
@@ -344,6 +524,7 @@ const AppContent: React.FC = () => {
         budgets={data.budgets}
         transactions={data.transactions}
         creditCards={data.creditCards}
+        cardMonthlyClosings={data.cardMonthlyClosings}
         onAdd={(year, month) => setAddBudgetModalProps({isOpen: true, budgetToEdit: null, year, month})}
         onEdit={(budget) => setAddBudgetModalProps({isOpen: true, budgetToEdit: budget, year: budget.year, month: budget.month})}
         onDelete={handleDeleteBudget}
@@ -364,12 +545,31 @@ const AppContent: React.FC = () => {
           onDeleteCategory={handleDeleteCategory}
           onOpenImport={() => setImportModalProps({ isOpen: true, initialCardId: null })}
         />;
-      default: return <Dashboard transactions={data.transactions} creditCards={data.creditCards} savingsTransactions={data.savingsTransactions} bills={data.bills} billPayments={data.billPayments} billMonthlyAmounts={data.billMonthlyAmounts} budgets={data.budgets} financialGoals={data.financialGoals} onPayBill={handlePayBill} allCategories={data.allCategories} onBudgetCategoryClick={handleDashboardCategoryClick} onMonthSummaryClick={handleMonthSummaryClick} />;
+      default: return <Dashboard
+        transactions={data.transactions}
+        creditCards={data.creditCards}
+        savingsTransactions={data.savingsTransactions}
+        bills={data.bills}
+        billPayments={data.billPayments}
+        billMonthlyAmounts={data.billMonthlyAmounts}
+        budgets={data.budgets}
+        financialGoals={data.financialGoals}
+        cardMonthlyClosings={data.cardMonthlyClosings}
+        onPayBill={handlePayBill}
+        allCategories={data.allCategories}
+        onBudgetCategoryClick={handleDashboardCategoryClick}
+        onMonthSummaryClick={handleMonthSummaryClick}
+        onOpenCards={() => handleNavClick('cards')}
+        onOpenBills={() => handleNavClick('bills')}
+        onOpenForecast={() => handleNavClick('forecast')}
+      />;
     }
   }
   
   const mainNavItems = [
     { view: 'dashboard', label: 'Dashboard', icon: 'fa-chart-pie' },
+    { view: 'salary', label: 'Salário & Renda', icon: 'fa-money-bill-transfer' },
+    { view: 'forecast', label: 'Projeção', icon: 'fa-wand-magic-sparkles' },
     { view: 'reports', label: 'Relatórios', icon: 'fa-chart-line' },
     { view: 'transactions', label: 'Transações', icon: 'fa-exchange-alt' },
     { view: 'budget', label: 'Orçamentos', icon: 'fa-bullseye' },
@@ -558,55 +758,91 @@ const AppContent: React.FC = () => {
         </div>
       </nav>
 
-      {/* Mobile Sticky Top Header */}
-      <header className="md:hidden sticky top-0 z-30 bg-slate-900/90 backdrop-blur-xl border-b border-white/[0.08] px-4 py-3 flex items-center justify-between shadow-md">
-        <div
-          className="flex items-center gap-2.5 cursor-pointer max-w-[65%]"
-          onClick={() => handleNavClick('settings')}
-          title="Ver perfil nos Ajustes"
-        >
-          <UserAvatar
-            photoURL={currentUser?.photoURL}
-            name={currentUser?.displayName}
-            email={currentUser?.email}
-            size="sm"
-          />
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5">
-              <h1 className="text-sm font-bold text-white leading-tight truncate">
-                Olá, {currentUser?.displayName?.split(' ')[0] || currentUser?.email?.split('@')[0] || 'Usuário'}
-              </h1>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse flex-shrink-0"></span>
+      {/* Content Wrapper (Header + Main) */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-screen md:min-h-0 overflow-hidden">
+        {/* Mobile Sticky Top Header */}
+        <header className="md:hidden sticky top-0 z-30 bg-slate-900/90 backdrop-blur-xl border-b border-white/[0.08] px-4 py-3 flex items-center justify-between shadow-md">
+          <div
+            className="flex items-center gap-2.5 cursor-pointer max-w-[50%]"
+            onClick={() => handleNavClick('settings')}
+            title="Ver perfil nos Ajustes"
+          >
+            <UserAvatar
+              photoURL={currentUser?.photoURL}
+              name={currentUser?.displayName}
+              email={currentUser?.email}
+              size="sm"
+            />
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <h1 className="text-sm font-bold text-white leading-tight truncate">
+                  Olá, {currentUser?.displayName?.split(' ')[0] || currentUser?.email?.split('@')[0] || 'Usuário'}
+                </h1>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse flex-shrink-0"></span>
+              </div>
+              <p className="text-[10px] text-slate-400 font-medium truncate">
+                {currentUser?.email || 'FinControl SQLite'}
+              </p>
             </div>
-            <p className="text-[10px] text-slate-400 font-medium truncate">
-              {currentUser?.email || 'FinControl SQLite'}
-            </p>
           </div>
-        </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setIsMobileMenuOpen(true)}
-            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold border border-white/10 flex items-center gap-1.5 transition-colors"
-          >
-            <i className="fa-solid fa-layer-group text-xs text-blue-400"></i>
-            <span>Menus</span>
-          </button>
-          <button
-            onClick={logout}
-            className="w-8 h-8 rounded-xl bg-slate-800/80 hover:bg-rose-500/15 text-slate-400 hover:text-rose-400 border border-white/5 flex items-center justify-center text-xs transition-colors"
-            title="Sair"
-            aria-label="Sair"
-          >
-            <i className="fa-solid fa-sign-out-alt"></i>
-          </button>
-        </div>
-      </header>
+          <div className="flex items-center gap-2">
+            {/* Notification Bell on Mobile */}
+            <NotificationCenter
+              alerts={radarAlerts}
+              onNavigate={handleRadarNavigate}
+            />
 
-      {/* Main Content Area */}
-      <main className="flex-1 p-4 sm:p-6 lg:p-8 pb-28 md:pb-8 overflow-y-auto custom-scrollbar">
-        {renderView()}
-      </main>
+            <button
+              onClick={() => setIsMobileMenuOpen(true)}
+              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold border border-white/10 flex items-center gap-1.5 transition-colors"
+            >
+              <i className="fa-solid fa-layer-group text-xs text-blue-400"></i>
+              <span>Menus</span>
+            </button>
+            <button
+              onClick={logout}
+              className="w-8 h-8 rounded-xl bg-slate-800/80 hover:bg-rose-500/15 text-slate-400 hover:text-rose-400 border border-white/5 flex items-center justify-center text-xs transition-colors"
+              title="Sair"
+              aria-label="Sair"
+            >
+              <i className="fa-solid fa-sign-out-alt"></i>
+            </button>
+          </div>
+        </header>
+
+        {/* Desktop Sticky Header */}
+        <header className="hidden md:flex sticky top-0 z-30 bg-slate-900/60 backdrop-blur-xl border-b border-white/[0.06] px-6 sm:px-8 py-3.5 items-center justify-between shadow-sm">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xs font-bold text-blue-400 uppercase tracking-wider flex items-center gap-2">
+              <i className="fa-solid fa-wallet"></i>
+              <span>FinControl</span>
+            </span>
+            <span className="text-slate-600 text-sm">/</span>
+            <h2 className="text-base font-extrabold text-white tracking-tight">
+              {getViewTitle(activeView)}
+            </h2>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="hidden lg:inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-slate-800/80 border border-white/5 text-slate-300">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>SQLite Local</span>
+            </div>
+
+            {/* Notification Bell on Desktop */}
+            <NotificationCenter
+              alerts={radarAlerts}
+              onNavigate={handleRadarNavigate}
+            />
+          </div>
+        </header>
+
+        {/* Main Content Area */}
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 pb-28 md:pb-8 overflow-y-auto custom-scrollbar">
+          {renderView()}
+        </main>
+      </div>
       
       {/* Desktop Floating Action Button */}
       <button
@@ -749,6 +985,8 @@ const AppContent: React.FC = () => {
             {/* Grid of All Additional Menus */}
             <div className="grid grid-cols-2 gap-2.5 py-1">
               {[
+                { view: 'salary' as const, label: 'Salário & Renda', icon: 'fa-money-bill-transfer', iconColor: 'text-emerald-400', desc: 'Holerite, INSS e vale' },
+                { view: 'forecast' as const, label: 'Projeção', icon: 'fa-wand-magic-sparkles', iconColor: 'text-violet-400', desc: 'Saldo futuro e simulador' },
                 { view: 'reports' as const, label: 'Relatórios', icon: 'fa-chart-line', iconColor: 'text-blue-400', desc: 'Evolução e gráficos' },
                 { view: 'budget' as const, label: 'Orçamentos', icon: 'fa-bullseye', iconColor: 'text-purple-400', desc: 'Metas por categoria' },
                 { view: 'goals' as const, label: 'Metas', icon: 'fa-flag-checkered', iconColor: 'text-amber-400', desc: 'Objetivos financeiros' },
@@ -831,7 +1069,13 @@ const AppContent: React.FC = () => {
       )}
       
       {addLoanModalOpen && (
-        <AddLoanModal onClose={() => setAddLoanModalOpen(false)} onAddLoan={data.addLoan} onError={showError} />
+        <AddLoanModal
+          transactions={data.transactions}
+          creditCards={data.creditCards}
+          onClose={() => setAddLoanModalOpen(false)}
+          onAddLoan={data.addLoan}
+          onError={showError}
+        />
       )}
 
       {loanPaymentModalProps.isOpen && loanPaymentModalProps.loan && (

@@ -90,6 +90,7 @@ interface TransactionItemProps {
   onEdit: (transaction: Transaction) => void;
   onDelete: (transactionId: string) => void;
   allCategories: Category[];
+  onSelectTag?: (tag: string) => void;
 }
 
 const TransactionItem: React.FC<TransactionItemProps> = ({
@@ -97,6 +98,7 @@ const TransactionItem: React.FC<TransactionItemProps> = ({
   onEdit,
   onDelete,
   allCategories,
+  onSelectTag,
 }) => {
   const category = allCategories.find((c) => c.id === transaction.category);
   const isIncome = transaction.type === TransactionType.INCOME;
@@ -142,11 +144,29 @@ const TransactionItem: React.FC<TransactionItemProps> = ({
                 <span>{installmentStr !== '-' && installmentStr !== 'Parcelada' ? `Parcela ${installmentStr}` : 'Parcelada'}</span>
               </span>
             )}
+
+            {/* Tag Badges */}
+            {transaction.tags && transaction.tags.length > 0 && (
+              transaction.tags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectTag?.(tag);
+                  }}
+                  className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold bg-violet-500/15 hover:bg-violet-500/25 text-violet-300 border border-violet-500/30 transition-colors"
+                  title={`Filtrar por #${tag}`}
+                >
+                  #{tag}
+                </button>
+              ))
+            )}
           </div>
 
           <div className="flex items-center gap-2 text-xs text-slate-400 mt-1 flex-wrap">
             <span className="font-medium text-slate-300">{category?.name || 'Sem categoria'}</span>
-            {!isIncome && transaction.paymentMethod && (
+            {transaction.paymentMethod && (
               <>
                 <span className="text-slate-600">•</span>
                 <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
@@ -223,6 +243,7 @@ const TransactionList: React.FC<TransactionListProps> = ({
     type: '',
     category: '',
     paymentMethod: '',
+    tag: '',
     ...getInitialDateFilters(),
   });
 
@@ -232,6 +253,7 @@ const TransactionList: React.FC<TransactionListProps> = ({
         description: '',
         type: '',
         paymentMethod: '',
+        tag: '',
         category: initialFilters.category,
         startDate: initialFilters.startDate,
         endDate: initialFilters.endDate,
@@ -274,6 +296,7 @@ const TransactionList: React.FC<TransactionListProps> = ({
       type: '',
       category: '',
       paymentMethod: '',
+      tag: '',
       ...getInitialDateFilters(),
     });
   };
@@ -297,6 +320,11 @@ const TransactionList: React.FC<TransactionListProps> = ({
       }
       if (filters.paymentMethod && t.paymentMethod !== filters.paymentMethod) {
         return false;
+      }
+      if (filters.tag) {
+        if (!t.tags || !Array.isArray(t.tags) || !t.tags.some((tg) => tg.toLowerCase() === filters.tag.toLowerCase())) {
+          return false;
+        }
       }
       if (startDate && transactionDate < startDate) {
         return false;
@@ -375,9 +403,26 @@ const TransactionList: React.FC<TransactionListProps> = ({
     return Array.from(methods) as PaymentMethod[];
   }, [transactions, filters.type]);
 
+  const uniqueTags = useMemo(() => {
+    const set = new Set<string>();
+    transactions.forEach((t) => {
+      if (t.tags && Array.isArray(t.tags)) {
+        t.tags.forEach((tag) => {
+          if (tag) set.add(tag.toLowerCase().trim());
+        });
+      }
+    });
+    return Array.from(set).sort();
+  }, [transactions]);
+
+  const handleSelectTag = (tag: string) => {
+    setFilters((prev) => ({ ...prev, tag }));
+    setIsFilterVisible(true);
+  };
+
   // CSV Export utility
   const handleExportCSV = () => {
-    const headers = ['Data', 'Tipo', 'Descrição', 'Categoria', 'Forma de Pagamento', 'Parcela', 'Valor'];
+    const headers = ['Data', 'Tipo', 'Descrição', 'Categoria', 'Forma de Pagamento', 'Tags', 'Parcela', 'Valor'];
     const rows = filteredTransactions.map((t) => {
       const cat = allCategories.find((c) => c.id === t.category)?.name || t.category;
       const typeLabel = t.type === TransactionType.INCOME ? 'Receita' : 'Despesa';
@@ -395,6 +440,7 @@ const TransactionList: React.FC<TransactionListProps> = ({
         `"${(cleanDescription || '').replace(/"/g, '""')}"`,
         `"${cat}"`,
         `"${t.type === TransactionType.INCOME ? 'Entrada' : t.paymentMethod || ''}"`,
+        `"${(t.tags && Array.isArray(t.tags) ? t.tags.map((tg) => '#' + tg).join(', ') : '')}"`,
         `"${installmentStr}"`,
         `"${formattedAmount}"`,
       ].join(';');
@@ -557,6 +603,22 @@ const TransactionList: React.FC<TransactionListProps> = ({
         </div>
       </div>
 
+      {/* Active Tag Filter Indicator */}
+      {filters.tag && (
+        <div className="flex items-center gap-2 p-2 px-3 rounded-xl bg-violet-500/10 border border-violet-500/25 text-xs text-violet-300 animate-in fade-in duration-150">
+          <i className="fa-solid fa-hashtag text-violet-400 text-xs"></i>
+          <span>Filtrando por tag: <strong className="text-white font-semibold">#{filters.tag}</strong></span>
+          <button
+            onClick={() => setFilters((p) => ({ ...p, tag: '' }))}
+            className="ml-auto text-violet-400 hover:text-rose-300 transition-colors flex items-center gap-1 text-[11px] font-medium"
+            title="Remover filtro de tag"
+          >
+            <i className="fa-solid fa-xmark text-[10px]"></i>
+            <span>Limpar tag</span>
+          </button>
+        </div>
+      )}
+
       {/* Advanced Collapsible Filter Drawer */}
       {isFilterVisible && (
         <div className="glass-card p-5 rounded-2xl border border-white/[0.08] space-y-4 animate-in fade-in zoom-in-95 duration-200">
@@ -570,7 +632,7 @@ const TransactionList: React.FC<TransactionListProps> = ({
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
             {/* Category Filter */}
             <div>
               <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
@@ -606,6 +668,27 @@ const TransactionList: React.FC<TransactionListProps> = ({
                 {uniquePaymentMethods.map((pm) => (
                   <option key={pm} value={pm}>
                     {pm}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Tag / Marcador Filter */}
+            <div>
+              <label htmlFor="filterTag" className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                Tag / Marcador
+              </label>
+              <select
+                id="filterTag"
+                name="tag"
+                value={filters.tag}
+                onChange={handleFilterChange}
+                className="w-full bg-slate-900/80 border border-white/10 rounded-xl px-3 py-2 text-white text-xs focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+              >
+                <option value="">Todas as Tags</option>
+                {uniqueTags.map((t) => (
+                  <option key={t} value={t}>
+                    #{t}
                   </option>
                 ))}
               </select>
@@ -673,6 +756,7 @@ const TransactionList: React.FC<TransactionListProps> = ({
                     onEdit={onEdit}
                     onDelete={onDelete}
                     allCategories={allCategories}
+                    onSelectTag={handleSelectTag}
                   />
                 ))}
               </div>

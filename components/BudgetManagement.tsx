@@ -1,12 +1,13 @@
 import React, { useState, useMemo } from 'react';
-import { Budget, Transaction, CreditCard, TransactionType, PaymentMethod, Category } from '../types';
-import { getBillInfoForTransaction, parseISODateAsUTC } from '../utils/dateUtils';
+import { Budget, Transaction, CreditCard, TransactionType, PaymentMethod, Category, CardMonthlyClosing } from '../types';
+import { getBillInfoForTransaction, parseISODateAsUTC, getEffectiveDueDate } from '../utils/dateUtils';
 
 interface BudgetManagementProps {
     budgets: Budget[];
     transactions: Transaction[];
     creditCards: CreditCard[];
     allCategories: Category[];
+    cardMonthlyClosings?: CardMonthlyClosing[];
     onAdd: (year: number, month: number) => void;
     onEdit: (budget: Budget) => void;
     onDelete: (budgetId: string) => void;
@@ -65,7 +66,7 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget, spent, category, onEdit
     );
 };
 
-const BudgetManagement: React.FC<BudgetManagementProps> = ({ budgets, transactions, creditCards, onAdd, onEdit, onDelete, onCopyBudgets, onError, allCategories }) => {
+const BudgetManagement: React.FC<BudgetManagementProps> = ({ budgets, transactions, creditCards, allCategories, cardMonthlyClosings = [], onAdd, onEdit, onDelete, onCopyBudgets, onError }) => {
     const [currentDate, setCurrentDate] = useState(new Date());
 
     const handlePrevMonth = () => {
@@ -88,7 +89,7 @@ const BudgetManagement: React.FC<BudgetManagementProps> = ({ budgets, transactio
     const currentMonth = currentDate.getMonth();
 
     const { monthlyBudgetData, totalBudgeted, totalSpent, budgetsFromPreviousMonth } = useMemo(() => {
-        const cardsById = new Map(creditCards.map(c => [c.id, c]));
+        const cardsById = new Map<string, CreditCard>(creditCards.map(c => [c.id, c]));
 
         const activeBudgets = budgets.filter(b => b.year === currentYear && b.month === currentMonth);
         const categorySpending: { [key: string]: number } = {};
@@ -99,10 +100,10 @@ const BudgetManagement: React.FC<BudgetManagementProps> = ({ budgets, transactio
             let effectiveDate: Date;
             const transactionDateAsUTC = parseISODateAsUTC(t.date);
 
-            if (t.paymentMethod === PaymentMethod.CREDIT_CARD && t.creditCardId) {
+            if ((t.paymentMethod === PaymentMethod.CREDIT_CARD || t.creditCardId) && t.creditCardId) {
                 const card = cardsById.get(t.creditCardId);
-                if (card) {
-                    effectiveDate = getBillInfoForTransaction(card, transactionDateAsUTC).dueDate;
+                if (card && transactionDateAsUTC && !isNaN(transactionDateAsUTC.getTime())) {
+                    effectiveDate = getEffectiveDueDate(t, card, cardMonthlyClosings);
                 } else {
                     effectiveDate = transactionDateAsUTC;
                 }
@@ -137,7 +138,7 @@ const BudgetManagement: React.FC<BudgetManagementProps> = ({ budgets, transactio
             budgetsFromPreviousMonth
         };
         
-    }, [budgets, transactions, creditCards, currentYear, currentMonth, allCategories]);
+    }, [budgets, transactions, creditCards, currentYear, currentMonth, allCategories, cardMonthlyClosings]);
     
     const handleCopyBudgets = () => {
         if (budgetsFromPreviousMonth.length === 0) {

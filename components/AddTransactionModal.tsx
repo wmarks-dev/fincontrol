@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Transaction, CreditCard, TransactionType, PaymentMethod, Category, RecurringTransaction } from '../types';
 import { v4 as uuidv4 } from 'uuid';
-import { parseISODateAsUTC } from '../utils/dateUtils';
+import { parseISODateAsUTC, getTodayLocalDate } from '../utils/dateUtils';
 import { getCardTheme } from './RealisticCreditCard';
+import { useData } from '../contexts/DataContext';
 
 const formatCurrency = (value: number) => {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -33,16 +34,54 @@ const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   allCategories,
   onError,
 }) => {
+  const { transactions } = useData();
   const [formType, setFormType] = useState<FormType>('expense');
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(getTodayLocalDate());
   const [category, setCategory] = useState<string>(allCategories.length > 0 ? allCategories[0].id : '');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(PaymentMethod.CASH);
   const [creditCardId, setCreditCardId] = useState<string>(creditCards.length > 0 ? creditCards[0].id : '');
   const [installments, setInstallments] = useState('2');
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState('');
 
   const isEditing = !!transactionToEdit;
+
+  // Extract all existing unique tags from database
+  const availableTags = useMemo(() => {
+    const set = new Set<string>();
+    transactions.forEach((t) => {
+      if (t.tags && Array.isArray(t.tags)) {
+        t.tags.forEach((tag) => {
+          if (tag) set.add(tag.toLowerCase().trim());
+        });
+      }
+    });
+    return Array.from(set).sort();
+  }, [transactions]);
+
+  const handleAddTag = (rawTag: string) => {
+    const cleaned = rawTag.replace(/^#/, '').trim().toLowerCase();
+    if (!cleaned) return;
+    if (!tags.includes(cleaned)) {
+      setTags((prev) => [...prev, cleaned]);
+    }
+    setTagInput('');
+  };
+
+  const handleRemoveTag = (tagToRemove: string) => {
+    setTags((prev) => prev.filter((t) => t !== tagToRemove));
+  };
+
+  const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      handleAddTag(tagInput);
+    } else if (e.key === 'Backspace' && !tagInput && tags.length > 0) {
+      setTags((prev) => prev.slice(0, -1));
+    }
+  };
 
   useEffect(() => {
     if (isEditing && transactionToEdit) {
@@ -55,15 +94,19 @@ const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
       setPaymentMethod(isIncome ? PaymentMethod.CASH : (t.paymentMethod || PaymentMethod.CASH));
       setCreditCardId(isIncome ? '' : (t.creditCardId || (creditCards.length > 0 ? creditCards[0].id : '')));
       setFormType(isIncome ? 'income' : 'expense');
+      setTags(t.tags && Array.isArray(t.tags) ? [...t.tags] : []);
     } else if (transactionToPrefill) {
       const isIncome = transactionToPrefill.type === TransactionType.INCOME;
       setDescription(transactionToPrefill.description || '');
       setAmount(String(transactionToPrefill.amount || ''));
-      setDate(transactionToPrefill.date || new Date().toISOString().split('T')[0]);
+      setDate(transactionToPrefill.date || getTodayLocalDate());
       setCategory(transactionToPrefill.category || (allCategories.length > 0 ? allCategories[0].id : ''));
       setPaymentMethod(isIncome ? PaymentMethod.CASH : (transactionToPrefill.paymentMethod || PaymentMethod.CASH));
       setCreditCardId(isIncome ? '' : (transactionToPrefill.creditCardId || (creditCards.length > 0 ? creditCards[0].id : '')));
       setFormType(isIncome ? 'income' : 'expense');
+      setTags(transactionToPrefill.tags && Array.isArray(transactionToPrefill.tags) ? [...transactionToPrefill.tags] : []);
+    } else {
+      setTags([]);
     }
   }, [isEditing, transactionToEdit, transactionToPrefill, creditCards, allCategories]);
 
@@ -91,7 +134,7 @@ const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
 
     const availableCategories = allCategories.filter((c) =>
       formType === 'income'
-        ? ['salary', 'investment', 'other'].includes(c.id)
+        ? ['salary', 'investment', 'loans', 'other'].includes(c.id)
         : !['salary', 'investment'].includes(c.id)
     );
 
@@ -105,7 +148,7 @@ const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const availableCategories = useMemo(() => {
     return allCategories.filter((c) =>
       formType === 'income'
-        ? ['salary', 'investment', 'other'].includes(c.id)
+        ? ['salary', 'investment', 'loans', 'other'].includes(c.id)
         : !['salary', 'investment'].includes(c.id)
     );
   }, [allCategories, formType]);
@@ -154,6 +197,7 @@ const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         type: isIncome ? TransactionType.INCOME : TransactionType.EXPENSE,
         paymentMethod: isIncome ? PaymentMethod.CASH : paymentMethod,
         creditCardId: isIncome ? null : (paymentMethod === PaymentMethod.CREDIT_CARD ? creditCardId : null),
+        tags: tags.length > 0 ? tags : undefined,
       };
       onUpdateTransaction(updatedTransaction);
     } else {
@@ -166,6 +210,7 @@ const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           category,
           paymentMethod,
           creditCardId: paymentMethod === PaymentMethod.CREDIT_CARD ? creditCardId : null,
+          tags: tags.length > 0 ? tags : undefined,
         });
       } else {
         let newTransactions: Omit<Transaction, 'id'>[] = [];
@@ -179,6 +224,7 @@ const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             category,
             paymentMethod: PaymentMethod.CASH,
             creditCardId: null,
+            tags: tags.length > 0 ? tags : undefined,
           });
         } else if (formType === 'expense') {
           newTransactions.push({
@@ -189,6 +235,7 @@ const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             category,
             paymentMethod,
             creditCardId: paymentMethod === PaymentMethod.CREDIT_CARD ? creditCardId : null,
+            tags: tags.length > 0 ? tags : undefined,
           });
         } else if (formType === 'installment') {
           const installmentCount = parseInt(installments, 10);
@@ -223,6 +270,7 @@ const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
               paymentMethod: PaymentMethod.CREDIT_CARD,
               creditCardId: creditCardId,
               installmentId,
+              tags: tags.length > 0 ? tags : undefined,
             });
           }
         }
@@ -477,6 +525,75 @@ const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                   );
                 })}
               </div>
+            </div>
+
+            {/* Tags / Marcadores */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <i className="fa-solid fa-hashtag text-violet-400"></i>
+                  Tags / Marcadores
+                  <span className="text-[10px] text-slate-500 font-normal lowercase">(opcional)</span>
+                </label>
+                {tags.length > 0 && (
+                  <span className="text-[10px] text-violet-400/80 font-medium">
+                    {tags.length} selecionada{tags.length > 1 ? 's' : ''}
+                  </span>
+                )}
+              </div>
+
+              {/* Tag Input and Current Tags Container */}
+              <div className="p-2.5 bg-slate-900/60 rounded-xl border border-white/[0.08] focus-within:border-violet-500/50 focus-within:ring-1 focus-within:ring-violet-500/30 transition-all flex flex-wrap items-center gap-1.5 min-h-[44px]">
+                {tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-violet-500/20 text-violet-300 border border-violet-500/30 animate-in fade-in zoom-in duration-150"
+                  >
+                    <span>#{tag}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveTag(tag)}
+                      className="text-violet-400 hover:text-rose-300 ml-0.5 transition-colors focus:outline-none"
+                    >
+                      <i className="fa-solid fa-xmark text-[10px]"></i>
+                    </button>
+                  </span>
+                ))}
+
+                <input
+                  type="text"
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={handleTagKeyDown}
+                  onBlur={() => {
+                    if (tagInput.trim()) handleAddTag(tagInput);
+                  }}
+                  placeholder={tags.length === 0 ? "Ex: viagem, reforma, trabalho (Enter para adicionar)" : "+ nova tag..."}
+                  className="bg-transparent border-none text-xs text-white placeholder-slate-500 focus:outline-none flex-1 min-w-[140px] py-1 px-1"
+                />
+              </div>
+
+              {/* Tag Suggestions from previously used tags */}
+              {availableTags.filter((t) => !tags.includes(t)).length > 0 && (
+                <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] text-slate-500 font-medium mr-1 flex items-center gap-1">
+                    <i className="fa-solid fa-lightbulb text-amber-400/70 text-[9px]"></i> Sugestões:
+                  </span>
+                  {availableTags
+                    .filter((t) => !tags.includes(t))
+                    .slice(0, 6)
+                    .map((sugTag) => (
+                      <button
+                        key={sugTag}
+                        type="button"
+                        onClick={() => handleAddTag(sugTag)}
+                        className="text-[11px] px-2 py-0.5 rounded-md bg-slate-800/80 hover:bg-violet-900/40 text-slate-400 hover:text-violet-200 border border-white/[0.05] hover:border-violet-500/30 transition-all"
+                      >
+                        +{sugTag}
+                      </button>
+                    ))}
+                </div>
+              )}
             </div>
 
             {/* Payment Method (for Expense or Recurring) */}

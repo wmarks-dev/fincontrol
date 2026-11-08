@@ -42,6 +42,8 @@ export async function initDb() {
           installment_id TEXT,
           recurring_id TEXT,
           is_paid INTEGER DEFAULT 0,
+          custom_due_date TEXT,
+          tags TEXT,
           created_at TEXT DEFAULT (datetime('now'))
         );
         CREATE INDEX IF NOT EXISTS idx_transactions_user ON transactions(user_id);
@@ -58,6 +60,7 @@ export async function initDb() {
           payment_method TEXT NOT NULL,
           credit_card_id TEXT,
           status TEXT NOT NULL DEFAULT 'active',
+          tags TEXT,
           created_at TEXT DEFAULT (datetime('now'))
         );
         CREATE INDEX IF NOT EXISTS idx_recurring_user ON recurring_transactions(user_id);
@@ -107,6 +110,8 @@ export async function initDb() {
           date TEXT NOT NULL,
           description TEXT NOT NULL,
           status TEXT NOT NULL DEFAULT 'active',
+          payment_method TEXT DEFAULT 'cash',
+          transaction_id TEXT,
           created_at TEXT DEFAULT (datetime('now'))
         );
         CREATE INDEX IF NOT EXISTS idx_loans_user ON loans(user_id);
@@ -203,6 +208,114 @@ export async function initDb() {
           created_at TEXT DEFAULT (datetime('now'))
         );
         CREATE INDEX IF NOT EXISTS idx_categories_user ON custom_categories(user_id);
+
+        CREATE TABLE IF NOT EXISTS salary_configs (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL UNIQUE,
+          gross_salary REAL NOT NULL DEFAULT 0,
+          dependents INTEGER NOT NULL DEFAULT 0,
+          other_deductions REAL NOT NULL DEFAULT 0,
+          advance_percentage REAL NOT NULL DEFAULT 40,
+          advance_day INTEGER NOT NULL DEFAULT 20,
+          payday_day INTEGER NOT NULL DEFAULT 5,
+          use_custom_advance INTEGER NOT NULL DEFAULT 0,
+          custom_advance_amount REAL NOT NULL DEFAULT 0,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          use_custom_taxes INTEGER NOT NULL DEFAULT 0,
+          custom_inss_amount REAL NOT NULL DEFAULT 0,
+          custom_irrf_amount REAL NOT NULL DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_salary_configs_user ON salary_configs(user_id);
+
+        CREATE TABLE IF NOT EXISTS salary_monthly_records (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          year INTEGER NOT NULL,
+          month INTEGER NOT NULL,
+          projected_advance REAL NOT NULL DEFAULT 0,
+          projected_payday REAL NOT NULL DEFAULT 0,
+          real_advance REAL,
+          real_payday REAL,
+          advance_date TEXT,
+          payday_date TEXT,
+          notes TEXT,
+          advance_transaction_id TEXT,
+          payday_transaction_id TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          UNIQUE(user_id, year, month)
+        );
+        CREATE INDEX IF NOT EXISTS idx_salary_records_user ON salary_monthly_records(user_id);
+
+        CREATE TABLE IF NOT EXISTS salary_tax_tables (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          year INTEGER NOT NULL,
+          inss_brackets TEXT NOT NULL,
+          inss_ceiling REAL NOT NULL,
+          irrf_brackets TEXT NOT NULL,
+          dependent_deduction REAL NOT NULL,
+          simplified_deduction REAL NOT NULL,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now')),
+          UNIQUE(user_id, year)
+        );
+        CREATE INDEX IF NOT EXISTS idx_salary_tax_tables_user ON salary_tax_tables(user_id);
+
+        CREATE TABLE IF NOT EXISTS salary_itemized_entries (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          year INTEGER NOT NULL,
+          month INTEGER NOT NULL,
+          type TEXT NOT NULL,
+          name TEXT NOT NULL,
+          amount REAL NOT NULL,
+          is_recurring INTEGER NOT NULL DEFAULT 0,
+          notes TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_salary_items_user ON salary_itemized_entries(user_id);
+        CREATE INDEX IF NOT EXISTS idx_salary_items_period ON salary_itemized_entries(user_id, year, month);
+
+        CREATE TABLE IF NOT EXISTS salary_thirteenth_configs (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          year INTEGER NOT NULL,
+          months_worked INTEGER DEFAULT 12,
+          first_installment_month INTEGER DEFAULT 10,
+          first_installment_percentage REAL DEFAULT 50,
+          first_installment_pay_day INTEGER DEFAULT 30,
+          second_installment_pay_day INTEGER DEFAULT 20,
+          custom_first_installment_amount REAL,
+          custom_second_installment_amount REAL,
+          first_installment_real REAL,
+          second_installment_real REAL,
+          first_installment_date TEXT,
+          second_installment_date TEXT,
+          first_installment_transaction_id TEXT,
+          second_installment_transaction_id TEXT,
+          notes TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          UNIQUE(user_id, year)
+        );
+        CREATE INDEX IF NOT EXISTS idx_salary_thirteenth_user ON salary_thirteenth_configs(user_id);
+
+        CREATE TABLE IF NOT EXISTS salary_vacation_configs (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          year INTEGER NOT NULL,
+          vacation_days INTEGER DEFAULT 30,
+          sell_days INTEGER DEFAULT 0,
+          start_date TEXT,
+          advance_thirteenth INTEGER DEFAULT 0,
+          custom_amount REAL,
+          real_amount REAL,
+          payment_date TEXT,
+          transaction_id TEXT,
+          notes TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_salary_vacations_user ON salary_vacation_configs(user_id);
       `);
 
       // Migrations for existing databases
@@ -237,6 +350,30 @@ export async function initDb() {
       }
 
       try {
+        await db.exec(`ALTER TABLE loans ADD COLUMN payment_method TEXT DEFAULT 'cash';`);
+      } catch (e) {
+        // column already exists, safe to ignore
+      }
+
+      try {
+        await db.exec(`ALTER TABLE loans ADD COLUMN transaction_id TEXT;`);
+      } catch (e) {
+        // column already exists, safe to ignore
+      }
+
+      try {
+        await db.exec(`ALTER TABLE transactions ADD COLUMN tags TEXT;`);
+      } catch (e) {
+        // column already exists, safe to ignore
+      }
+
+      try {
+        await db.exec(`ALTER TABLE recurring_transactions ADD COLUMN tags TEXT;`);
+      } catch (e) {
+        // column already exists, safe to ignore
+      }
+
+      try {
         await db.exec(`
           UPDATE bills
           SET start_year = CAST(strftime('%Y', COALESCE(created_at, datetime('now'))) AS INTEGER),
@@ -246,6 +383,57 @@ export async function initDb() {
       } catch (e) {
         // safe to ignore
       }
+
+      try {
+        await db.exec(`ALTER TABLE salary_configs ADD COLUMN use_custom_taxes INTEGER DEFAULT 0;`);
+      } catch (e) {}
+
+      try {
+        await db.exec(`ALTER TABLE salary_configs ADD COLUMN custom_inss_amount REAL DEFAULT 0;`);
+      } catch (e) {}
+
+      try {
+        await db.exec(`ALTER TABLE salary_configs ADD COLUMN custom_irrf_amount REAL DEFAULT 0;`);
+      } catch (e) {}
+
+      try {
+        await db.exec(`ALTER TABLE salary_configs ADD COLUMN tax_year INTEGER DEFAULT 2026;`);
+      } catch (e) {}
+
+      try {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS salary_tax_tables (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            year INTEGER NOT NULL,
+            inss_brackets TEXT NOT NULL,
+            inss_ceiling REAL NOT NULL,
+            irrf_brackets TEXT NOT NULL,
+            dependent_deduction REAL NOT NULL,
+            simplified_deduction REAL NOT NULL,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(user_id, year)
+          );
+        `);
+      } catch (e) {}
+
+      try {
+        await db.exec(`
+          CREATE TABLE IF NOT EXISTS salary_itemized_entries (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            year INTEGER NOT NULL,
+            month INTEGER NOT NULL,
+            type TEXT NOT NULL,
+            name TEXT NOT NULL,
+            amount REAL NOT NULL,
+            is_recurring INTEGER NOT NULL DEFAULT 0,
+            notes TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+          );
+        `);
+      } catch (e) {}
 
       return db;
     })();

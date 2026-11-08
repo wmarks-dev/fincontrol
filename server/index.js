@@ -36,6 +36,33 @@ const requireUser = async (req,res,next) => {
 
 app.use('/api', requireUser);
 
+const parseTags = (tags) => {
+  if (!tags) return undefined;
+  if (Array.isArray(tags)) return tags;
+  if (typeof tags === 'string') {
+    tags = tags.trim();
+    if (!tags) return undefined;
+    if (tags.startsWith('[') && tags.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(tags);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {}
+    }
+    return tags.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  return undefined;
+};
+
+const serializeTags = (tags) => {
+  if (!tags) return null;
+  if (Array.isArray(tags)) return JSON.stringify(tags.filter(Boolean));
+  if (typeof tags === 'string') {
+    const arr = tags.split(',').map((s) => s.trim()).filter(Boolean);
+    return arr.length > 0 ? JSON.stringify(arr) : null;
+  }
+  return null;
+};
+
 // ----------------------------------------------------
 // GET /api/data - Load all collections for the user
 // ----------------------------------------------------
@@ -59,6 +86,12 @@ app.get('/api/data', async (req, res) => {
       contributionsRows,
       categoriesRows,
       cardMonthlyClosingsRows,
+      salaryConfigRow,
+      salaryRecordsRows,
+      salaryTaxTablesRows,
+      salaryItemizedRows,
+      salaryThirteenthRows,
+      salaryVacationRows,
     ] = await Promise.all([
       db.all('SELECT * FROM transactions WHERE user_id = ? ORDER BY date DESC, created_at DESC', userId),
       db.all('SELECT * FROM recurring_transactions WHERE user_id = ? ORDER BY date ASC', userId),
@@ -74,6 +107,12 @@ app.get('/api/data', async (req, res) => {
       db.all('SELECT * FROM goal_contributions WHERE user_id = ? ORDER BY date DESC', userId),
       db.all('SELECT * FROM custom_categories WHERE user_id = ? ORDER BY name ASC', userId),
       db.all('SELECT * FROM card_monthly_closings WHERE user_id = ? ORDER BY year ASC, month ASC', userId),
+      db.get('SELECT * FROM salary_configs WHERE user_id = ?', userId),
+      db.all('SELECT * FROM salary_monthly_records WHERE user_id = ? ORDER BY year DESC, month DESC', userId),
+      db.all('SELECT * FROM salary_tax_tables WHERE user_id = ? ORDER BY year ASC', userId),
+      db.all('SELECT * FROM salary_itemized_entries WHERE user_id = ? ORDER BY year ASC, month ASC, created_at ASC', userId),
+      db.all('SELECT * FROM salary_thirteenth_configs WHERE user_id = ? ORDER BY year DESC', userId),
+      db.all('SELECT * FROM salary_vacation_configs WHERE user_id = ? ORDER BY year DESC, start_date ASC', userId),
     ]);
 
     const data = {
@@ -90,6 +129,7 @@ app.get('/api/data', async (req, res) => {
         recurringId: r.recurring_id || undefined,
         isPaid: Boolean(r.is_paid),
         customDueDate: r.custom_due_date || undefined,
+        tags: parseTags(r.tags),
       })),
       recurringTransactions: recurringRows.map(r => ({
         id: r.id,
@@ -101,6 +141,7 @@ app.get('/api/data', async (req, res) => {
         paymentMethod: r.payment_method,
         creditCardId: r.credit_card_id || undefined,
         status: r.status,
+        tags: parseTags(r.tags),
       })),
       creditCards: cardsRows.map(r => ({
         id: r.id,
@@ -133,6 +174,8 @@ app.get('/api/data', async (req, res) => {
         date: r.date,
         description: r.description,
         status: r.status,
+        paymentMethod: r.payment_method || 'cash',
+        transactionId: r.transaction_id || null,
       })),
       loanPayments: loanPaymentsRows.map(r => ({
         id: r.id,
@@ -193,6 +236,87 @@ app.get('/api/data', async (req, res) => {
         icon: r.icon,
         isCustom: Boolean(r.is_custom),
       })),
+      salaryConfig: salaryConfigRow ? {
+        id: salaryConfigRow.id,
+        grossSalary: Number(salaryConfigRow.gross_salary),
+        dependents: Number(salaryConfigRow.dependents),
+        otherDeductions: Number(salaryConfigRow.other_deductions),
+        advancePercentage: Number(salaryConfigRow.advance_percentage),
+        advanceDay: Number(salaryConfigRow.advance_day),
+        paydayDay: Number(salaryConfigRow.payday_day),
+        useCustomAdvance: Boolean(salaryConfigRow.use_custom_advance),
+        customAdvanceAmount: Number(salaryConfigRow.custom_advance_amount),
+        isActive: Boolean(salaryConfigRow.is_active),
+        useCustomTaxes: Boolean(salaryConfigRow.use_custom_taxes),
+        customInssAmount: Number(salaryConfigRow.custom_inss_amount || 0),
+        customIrrfAmount: Number(salaryConfigRow.custom_irrf_amount || 0),
+        taxYear: Number(salaryConfigRow.tax_year || 2026),
+      } : null,
+      salaryMonthlyRecords: salaryRecordsRows.map(r => ({
+        id: r.id,
+        year: Number(r.year),
+        month: Number(r.month),
+        projectedAdvance: Number(r.projected_advance),
+        projectedPayday: Number(r.projected_payday),
+        realAdvance: r.real_advance !== null && r.real_advance !== undefined ? Number(r.real_advance) : null,
+        realPayday: r.real_payday !== null && r.real_payday !== undefined ? Number(r.real_payday) : null,
+        advanceDate: r.advance_date || null,
+        paydayDate: r.payday_date || null,
+        notes: r.notes || '',
+        advanceTransactionId: r.advance_transaction_id || null,
+        paydayTransactionId: r.payday_transaction_id || null,
+      })),
+      salaryTaxTables: salaryTaxTablesRows.map(r => ({
+        id: r.id,
+        year: Number(r.year),
+        inssCeiling: Number(r.inss_ceiling),
+        inssBrackets: typeof r.inss_brackets === 'string' ? JSON.parse(r.inss_brackets) : r.inss_brackets,
+        irrfBrackets: typeof r.irrf_brackets === 'string' ? JSON.parse(r.irrf_brackets) : r.irrf_brackets,
+        dependentDeduction: Number(r.dependent_deduction),
+        simplifiedDeduction: Number(r.simplified_deduction),
+      })),
+      salaryItemizedEntries: salaryItemizedRows.map(r => ({
+        id: r.id,
+        year: Number(r.year),
+        month: Number(r.month),
+        type: r.type,
+        name: r.name,
+        amount: Number(r.amount),
+        isRecurring: Boolean(r.is_recurring),
+        notes: r.notes || '',
+        createdAt: r.created_at,
+      })),
+      salaryThirteenthConfigs: (salaryThirteenthRows || []).map(r => ({
+        id: r.id,
+        year: Number(r.year),
+        monthsWorked: Number(r.months_worked || 12),
+        firstInstallmentMonth: Number(r.first_installment_month !== null && r.first_installment_month !== undefined ? r.first_installment_month : 10),
+        firstInstallmentPercentage: Number(r.first_installment_percentage || 50),
+        firstInstallmentPayDay: Number(r.first_installment_pay_day || 30),
+        secondInstallmentPayDay: Number(r.second_installment_pay_day || 20),
+        customFirstInstallmentAmount: r.custom_first_installment_amount !== null && r.custom_first_installment_amount !== undefined ? Number(r.custom_first_installment_amount) : null,
+        customSecondInstallmentAmount: r.custom_second_installment_amount !== null && r.custom_second_installment_amount !== undefined ? Number(r.custom_second_installment_amount) : null,
+        firstInstallmentReal: r.first_installment_real !== null && r.first_installment_real !== undefined ? Number(r.first_installment_real) : null,
+        secondInstallmentReal: r.second_installment_real !== null && r.second_installment_real !== undefined ? Number(r.second_installment_real) : null,
+        firstInstallmentDate: r.first_installment_date || null,
+        secondInstallmentDate: r.second_installment_date || null,
+        firstInstallmentTransactionId: r.first_installment_transaction_id || null,
+        secondInstallmentTransactionId: r.second_installment_transaction_id || null,
+        notes: r.notes || '',
+      })),
+      salaryVacationConfigs: (salaryVacationRows || []).map(r => ({
+        id: r.id,
+        year: Number(r.year),
+        vacationDays: Number(r.vacation_days || 30),
+        sellDays: Number(r.sell_days || 0),
+        startDate: r.start_date || '',
+        advanceThirteenth: Boolean(r.advance_thirteenth),
+        customAmount: r.custom_amount !== null && r.custom_amount !== undefined ? Number(r.custom_amount) : null,
+        realAmount: r.real_amount !== null && r.real_amount !== undefined ? Number(r.real_amount) : null,
+        paymentDate: r.payment_date || null,
+        transactionId: r.transaction_id || null,
+        notes: r.notes || '',
+      })),
     };
 
     res.json(data);
@@ -220,8 +344,8 @@ app.post('/api/transactions', async (req, res) => {
       const insertStmt = await db.prepare(`
         INSERT INTO transactions (
           id, user_id, description, amount, date, type, category,
-          payment_method, credit_card_id, installment_id, recurring_id, is_paid, custom_due_date
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          payment_method, credit_card_id, installment_id, recurring_id, is_paid, custom_due_date, tags
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       for (const t of transactions) {
@@ -239,7 +363,8 @@ app.post('/api/transactions', async (req, res) => {
           t.installmentId || null,
           t.recurringId || null,
           t.isPaid ? 1 : 0,
-          t.customDueDate || null
+          t.customDueDate || null,
+          serializeTags(t.tags)
         );
       }
       await insertStmt.finalize();
@@ -304,7 +429,8 @@ app.put('/api/transactions/:id', async (req, res) => {
         installment_id = ?,
         recurring_id = ?,
         is_paid = ?,
-        custom_due_date = ?
+        custom_due_date = ?,
+        tags = ?
       WHERE id = ? AND user_id = ?`,
       t.description,
       t.amount,
@@ -317,6 +443,7 @@ app.put('/api/transactions/:id', async (req, res) => {
       t.recurringId || null,
       t.isPaid ? 1 : 0,
       t.customDueDate !== undefined ? (t.customDueDate || null) : null,
+      serializeTags(t.tags),
       id,
       userId
     );
@@ -376,8 +503,8 @@ app.post('/api/recurring', async (req, res) => {
     await db.run(
       `INSERT INTO recurring_transactions (
         id, user_id, description, amount, date, type, category,
-        payment_method, credit_card_id, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        payment_method, credit_card_id, status, tags
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       userId,
       data.description,
@@ -387,7 +514,8 @@ app.post('/api/recurring', async (req, res) => {
       data.category,
       data.paymentMethod,
       data.creditCardId || null,
-      'active'
+      'active',
+      serializeTags(data.tags)
     );
 
     res.json({ success: true, id });
@@ -616,14 +744,40 @@ app.post('/api/loans', async (req, res) => {
     const userId = req.userId;
     const data = req.body;
     const loanId = randomUUID();
-    const mirrorTxId = randomUUID();
 
     await db.run('BEGIN TRANSACTION');
     try {
+      const paymentMethod = data.paymentMethod || 'cash';
+      const transactionId = data.transactionId || null;
+      let finalTxId = transactionId;
+
+      // Only create mirror transaction if NOT linked to an existing transaction
+      // and createTransaction is not explicitly false
+      if (!transactionId && data.createTransaction !== false) {
+        const mirrorTxId = randomUUID();
+        const mirrorDesc = `Empréstimo ${data.type === 'GIVEN' ? 'para' : 'de'} ${data.person}`;
+        const mirrorType = data.type === 'GIVEN' ? 'EXPENSE' : 'INCOME';
+
+        await db.run(
+          `INSERT INTO transactions (
+            id, user_id, description, amount, date, type, category, payment_method
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          mirrorTxId,
+          userId,
+          mirrorDesc,
+          data.initialAmount,
+          data.date,
+          mirrorType,
+          'loans',
+          'Dinheiro'
+        );
+        finalTxId = mirrorTxId;
+      }
+
       await db.run(
         `INSERT INTO loans (
-          id, user_id, type, person, initial_amount, paid_amount, date, description, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          id, user_id, type, person, initial_amount, paid_amount, date, description, status, payment_method, transaction_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         loanId,
         userId,
         data.type,
@@ -631,25 +785,10 @@ app.post('/api/loans', async (req, res) => {
         data.initialAmount,
         0,
         data.date,
-        data.description,
-        'active'
-      );
-
-      const mirrorDesc = `Empréstimo ${data.type === 'GIVEN' ? 'para' : 'de'} ${data.person}`;
-      const mirrorType = data.type === 'GIVEN' ? 'EXPENSE' : 'INCOME';
-
-      await db.run(
-        `INSERT INTO transactions (
-          id, user_id, description, amount, date, type, category, payment_method
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        mirrorTxId,
-        userId,
-        mirrorDesc,
-        data.initialAmount,
-        data.date,
-        mirrorType,
-        'loans',
-        'Dinheiro'
+        data.description || '',
+        'active',
+        paymentMethod,
+        finalTxId
       );
 
       await db.run('COMMIT');
@@ -660,6 +799,43 @@ app.post('/api/loans', async (req, res) => {
     }
   } catch (error) {
     console.error('Erro em POST /api/loans:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/loans/:id', async (req, res) => {
+  try {
+    const db = await initDb();
+    const userId = req.userId;
+    const { id: loanId } = req.params;
+
+    await db.run('BEGIN TRANSACTION');
+    try {
+      const loan = await db.get('SELECT * FROM loans WHERE id = ? AND user_id = ?', loanId, userId);
+      if (!loan) {
+        await db.run('ROLLBACK');
+        return res.status(404).json({ error: 'Empréstimo não encontrado' });
+      }
+
+      // If the loan automatically created a mirror transaction in cash, delete it
+      if (loan.payment_method === 'cash' && loan.transaction_id) {
+        await db.run('DELETE FROM transactions WHERE id = ? AND user_id = ?', loan.transaction_id, userId);
+      }
+
+      // Delete payments
+      await db.run('DELETE FROM loan_payments WHERE loan_id = ? AND user_id = ?', loanId, userId);
+
+      // Delete loan
+      await db.run('DELETE FROM loans WHERE id = ? AND user_id = ?', loanId, userId);
+
+      await db.run('COMMIT');
+      res.json({ success: true });
+    } catch (err) {
+      await db.run('ROLLBACK');
+      throw err;
+    }
+  } catch (error) {
+    console.error('Erro em DELETE /api/loans/:id:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -1072,6 +1248,535 @@ app.delete('/api/categories/:id', async (req, res) => {
 });
 
 // ----------------------------------------------------
+// Salary Management
+// ----------------------------------------------------
+app.post('/api/salary/config', async (req, res) => {
+  try {
+    const db = await initDb();
+    const userId = req.userId;
+    const {
+      grossSalary = 0,
+      dependents = 0,
+      otherDeductions = 0,
+      advancePercentage = 40,
+      advanceDay = 20,
+      paydayDay = 5,
+      useCustomAdvance = false,
+      customAdvanceAmount = 0,
+      isActive = true,
+      useCustomTaxes = false,
+      customInssAmount = 0,
+      customIrrfAmount = 0,
+      taxYear = 2026,
+    } = req.body;
+
+    const id = req.body.id || randomUUID();
+
+    await db.run(
+      `INSERT INTO salary_configs (
+        id, user_id, gross_salary, dependents, other_deductions,
+        advance_percentage, advance_day, payday_day,
+        use_custom_advance, custom_advance_amount, is_active,
+        use_custom_taxes, custom_inss_amount, custom_irrf_amount, tax_year
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        gross_salary = excluded.gross_salary,
+        dependents = excluded.dependents,
+        other_deductions = excluded.other_deductions,
+        advance_percentage = excluded.advance_percentage,
+        advance_day = excluded.advance_day,
+        payday_day = excluded.payday_day,
+        use_custom_advance = excluded.use_custom_advance,
+        custom_advance_amount = excluded.custom_advance_amount,
+        is_active = excluded.is_active,
+        use_custom_taxes = excluded.use_custom_taxes,
+        custom_inss_amount = excluded.custom_inss_amount,
+        custom_irrf_amount = excluded.custom_irrf_amount,
+        tax_year = excluded.tax_year`,
+      id,
+      userId,
+      Number(grossSalary) || 0,
+      Number(dependents) || 0,
+      Number(otherDeductions) || 0,
+      Number(advancePercentage) || 0,
+      Number(advanceDay) || 20,
+      Number(paydayDay) || 5,
+      useCustomAdvance ? 1 : 0,
+      Number(customAdvanceAmount) || 0,
+      isActive ? 1 : 0,
+      useCustomTaxes ? 1 : 0,
+      Number(customInssAmount) || 0,
+      Number(customIrrfAmount) || 0,
+      Number(taxYear) || 2026
+    );
+
+    const saved = await db.get('SELECT * FROM salary_configs WHERE user_id = ?', userId);
+    res.json({
+      success: true,
+      config: {
+        id: saved.id,
+        grossSalary: Number(saved.gross_salary),
+        dependents: Number(saved.dependents),
+        otherDeductions: Number(saved.other_deductions),
+        advancePercentage: Number(saved.advance_percentage),
+        advanceDay: Number(saved.advance_day),
+        paydayDay: Number(saved.payday_day),
+        useCustomAdvance: Boolean(saved.use_custom_advance),
+        customAdvanceAmount: Number(saved.custom_advance_amount),
+        isActive: Boolean(saved.is_active),
+        useCustomTaxes: Boolean(saved.use_custom_taxes),
+        customInssAmount: Number(saved.custom_inss_amount || 0),
+        customIrrfAmount: Number(saved.custom_irrf_amount || 0),
+        taxYear: Number(saved.tax_year || 2026),
+      },
+    });
+  } catch (error) {
+    console.error('Erro em POST /api/salary/config:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/salary/record', async (req, res) => {
+  try {
+    const db = await initDb();
+    const userId = req.userId;
+    const {
+      year,
+      month,
+      projectedAdvance = 0,
+      projectedPayday = 0,
+      realAdvance = null,
+      realPayday = null,
+      advanceDate = null,
+      paydayDate = null,
+      notes = '',
+      advanceTransactionId = null,
+      paydayTransactionId = null,
+    } = req.body;
+
+    if (year === undefined || month === undefined) {
+      return res.status(400).json({ error: 'Ano e mês são obrigatórios' });
+    }
+
+    const id = req.body.id || randomUUID();
+
+    await db.run(
+      `INSERT INTO salary_monthly_records (
+        id, user_id, year, month, projected_advance, projected_payday,
+        real_advance, real_payday, advance_date, payday_date, notes,
+        advance_transaction_id, payday_transaction_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(user_id, year, month) DO UPDATE SET
+        projected_advance = excluded.projected_advance,
+        projected_payday = excluded.projected_payday,
+        real_advance = excluded.real_advance,
+        real_payday = excluded.real_payday,
+        advance_date = excluded.advance_date,
+        payday_date = excluded.payday_date,
+        notes = excluded.notes,
+        advance_transaction_id = excluded.advance_transaction_id,
+        payday_transaction_id = excluded.payday_transaction_id`,
+      id,
+      userId,
+      Number(year),
+      Number(month),
+      Number(projectedAdvance) || 0,
+      Number(projectedPayday) || 0,
+      realAdvance !== null && realAdvance !== undefined ? Number(realAdvance) : null,
+      realPayday !== null && realPayday !== undefined ? Number(realPayday) : null,
+      advanceDate || null,
+      paydayDate || null,
+      notes || '',
+      advanceTransactionId || null,
+      paydayTransactionId || null
+    );
+
+    const saved = await db.get(
+      'SELECT * FROM salary_monthly_records WHERE user_id = ? AND year = ? AND month = ?',
+      userId,
+      Number(year),
+      Number(month)
+    );
+
+    res.json({
+      success: true,
+      record: {
+        id: saved.id,
+        year: Number(saved.year),
+        month: Number(saved.month),
+        projectedAdvance: Number(saved.projected_advance),
+        projectedPayday: Number(saved.projected_payday),
+        realAdvance: saved.real_advance !== null && saved.real_advance !== undefined ? Number(saved.real_advance) : null,
+        realPayday: saved.real_payday !== null && saved.real_payday !== undefined ? Number(saved.real_payday) : null,
+        advanceDate: saved.advance_date || null,
+        paydayDate: saved.payday_date || null,
+        notes: saved.notes || '',
+        advanceTransactionId: saved.advance_transaction_id || null,
+        paydayTransactionId: saved.payday_transaction_id || null,
+      },
+    });
+  } catch (error) {
+    console.error('Erro em POST /api/salary/record:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/salary/tax-table', async (req, res) => {
+  try {
+    const db = await initDb();
+    const userId = req.userId;
+    const {
+      year,
+      inssBrackets,
+      inssCeiling,
+      irrfBrackets,
+      dependentDeduction,
+      simplifiedDeduction,
+    } = req.body;
+
+    if (!year) {
+      return res.status(400).json({ error: 'Ano da tabela fiscal é obrigatório' });
+    }
+
+    const id = req.body.id || randomUUID();
+
+    await db.run(
+      `INSERT INTO salary_tax_tables (
+        id, user_id, year, inss_brackets, inss_ceiling,
+        irrf_brackets, dependent_deduction, simplified_deduction, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(user_id, year) DO UPDATE SET
+        inss_brackets = excluded.inss_brackets,
+        inss_ceiling = excluded.inss_ceiling,
+        irrf_brackets = excluded.irrf_brackets,
+        dependent_deduction = excluded.dependent_deduction,
+        simplified_deduction = excluded.simplified_deduction,
+        updated_at = datetime('now')`,
+      id,
+      userId,
+      Number(year),
+      typeof inssBrackets === 'string' ? inssBrackets : JSON.stringify(inssBrackets),
+      Number(inssCeiling) || 0,
+      typeof irrfBrackets === 'string' ? irrfBrackets : JSON.stringify(irrfBrackets),
+      Number(dependentDeduction) || 0,
+      Number(simplifiedDeduction) || 0
+    );
+
+    const saved = await db.get(
+      'SELECT * FROM salary_tax_tables WHERE user_id = ? AND year = ?',
+      userId,
+      Number(year)
+    );
+
+    res.json({
+      success: true,
+      taxTable: {
+        id: saved.id,
+        year: Number(saved.year),
+        inssCeiling: Number(saved.inss_ceiling),
+        inssBrackets: typeof saved.inss_brackets === 'string' ? JSON.parse(saved.inss_brackets) : saved.inss_brackets,
+        irrfBrackets: typeof saved.irrf_brackets === 'string' ? JSON.parse(saved.irrf_brackets) : saved.irrf_brackets,
+        dependentDeduction: Number(saved.dependent_deduction),
+        simplifiedDeduction: Number(saved.simplified_deduction),
+      },
+    });
+  } catch (error) {
+    console.error('Erro em POST /api/salary/tax-table:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/salary/tax-table/:year', async (req, res) => {
+  try {
+    const db = await initDb();
+    const userId = req.userId;
+    const year = Number(req.params.year);
+
+    await db.run('DELETE FROM salary_tax_tables WHERE user_id = ? AND year = ?', userId, year);
+    res.json({ success: true, year });
+  } catch (error) {
+    console.error('Erro em DELETE /api/salary/tax-table/:year:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/salary/item', async (req, res) => {
+  try {
+    const db = await initDb();
+    const userId = req.userId;
+    const {
+      id = randomUUID(),
+      year,
+      month,
+      type,
+      name,
+      amount,
+      isRecurring = false,
+      notes = '',
+    } = req.body;
+
+    if (year === undefined || month === undefined || !type || !name) {
+      return res.status(400).json({ error: 'Ano, mês, tipo e nome são obrigatórios' });
+    }
+
+    await db.run(
+      `INSERT INTO salary_itemized_entries (
+        id, user_id, year, month, type, name, amount, is_recurring, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        year = excluded.year,
+        month = excluded.month,
+        type = excluded.type,
+        name = excluded.name,
+        amount = excluded.amount,
+        is_recurring = excluded.is_recurring,
+        notes = excluded.notes`,
+      id,
+      userId,
+      Number(year),
+      Number(month),
+      type,
+      name.trim(),
+      Number(amount) || 0,
+      isRecurring ? 1 : 0,
+      notes || ''
+    );
+
+    const saved = await db.get('SELECT * FROM salary_itemized_entries WHERE id = ?', id);
+
+    res.json({
+      success: true,
+      item: {
+        id: saved.id,
+        year: Number(saved.year),
+        month: Number(saved.month),
+        type: saved.type,
+        name: saved.name,
+        amount: Number(saved.amount),
+        isRecurring: Boolean(saved.is_recurring),
+        notes: saved.notes || '',
+        createdAt: saved.created_at,
+      },
+    });
+  } catch (error) {
+    console.error('Erro em POST /api/salary/item:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/salary/item/:id', async (req, res) => {
+  try {
+    const db = await initDb();
+    const userId = req.userId;
+    const itemId = req.params.id;
+
+    await db.run('DELETE FROM salary_itemized_entries WHERE user_id = ? AND id = ?', userId, itemId);
+    res.json({ success: true, id: itemId });
+  } catch (error) {
+    console.error('Erro em DELETE /api/salary/item/:id:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/salary/thirteenth', async (req, res) => {
+  try {
+    const db = await initDb();
+    const userId = req.userId;
+    const {
+      id = randomUUID(),
+      year,
+      monthsWorked = 12,
+      firstInstallmentMonth = 10,
+      firstInstallmentPercentage = 50,
+      firstInstallmentPayDay = 30,
+      secondInstallmentPayDay = 20,
+      customFirstInstallmentAmount = null,
+      customSecondInstallmentAmount = null,
+      firstInstallmentReal = null,
+      secondInstallmentReal = null,
+      firstInstallmentDate = null,
+      secondInstallmentDate = null,
+      firstInstallmentTransactionId = null,
+      secondInstallmentTransactionId = null,
+      notes = '',
+    } = req.body;
+
+    if (year === undefined) {
+      return res.status(400).json({ error: 'Ano é obrigatório' });
+    }
+
+    await db.run(
+      `INSERT INTO salary_thirteenth_configs (
+        id, user_id, year, months_worked, first_installment_month,
+        first_installment_percentage, first_installment_pay_day, second_installment_pay_day,
+        custom_first_installment_amount, custom_second_installment_amount,
+        first_installment_real, second_installment_real,
+        first_installment_date, second_installment_date,
+        first_installment_transaction_id, second_installment_transaction_id,
+        notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(user_id, year) DO UPDATE SET
+        months_worked = excluded.months_worked,
+        first_installment_month = excluded.first_installment_month,
+        first_installment_percentage = excluded.first_installment_percentage,
+        first_installment_pay_day = excluded.first_installment_pay_day,
+        second_installment_pay_day = excluded.second_installment_pay_day,
+        custom_first_installment_amount = excluded.custom_first_installment_amount,
+        custom_second_installment_amount = excluded.custom_second_installment_amount,
+        first_installment_real = excluded.first_installment_real,
+        second_installment_real = excluded.second_installment_real,
+        first_installment_date = excluded.first_installment_date,
+        second_installment_date = excluded.second_installment_date,
+        first_installment_transaction_id = excluded.first_installment_transaction_id,
+        second_installment_transaction_id = excluded.second_installment_transaction_id,
+        notes = excluded.notes`,
+      id,
+      userId,
+      Number(year),
+      Number(monthsWorked),
+      Number(firstInstallmentMonth),
+      Number(firstInstallmentPercentage),
+      Number(firstInstallmentPayDay),
+      Number(secondInstallmentPayDay),
+      customFirstInstallmentAmount !== null && customFirstInstallmentAmount !== undefined ? Number(customFirstInstallmentAmount) : null,
+      customSecondInstallmentAmount !== null && customSecondInstallmentAmount !== undefined ? Number(customSecondInstallmentAmount) : null,
+      firstInstallmentReal !== null && firstInstallmentReal !== undefined ? Number(firstInstallmentReal) : null,
+      secondInstallmentReal !== null && secondInstallmentReal !== undefined ? Number(secondInstallmentReal) : null,
+      firstInstallmentDate || null,
+      secondInstallmentDate || null,
+      firstInstallmentTransactionId || null,
+      secondInstallmentTransactionId || null,
+      notes || ''
+    );
+
+    const saved = await db.get(
+      'SELECT * FROM salary_thirteenth_configs WHERE user_id = ? AND year = ?',
+      userId,
+      Number(year)
+    );
+
+    res.json({
+      success: true,
+      config: {
+        id: saved.id,
+        year: Number(saved.year),
+        monthsWorked: Number(saved.months_worked),
+        firstInstallmentMonth: Number(saved.first_installment_month),
+        firstInstallmentPercentage: Number(saved.first_installment_percentage),
+        firstInstallmentPayDay: Number(saved.first_installment_pay_day),
+        secondInstallmentPayDay: Number(saved.second_installment_pay_day),
+        customFirstInstallmentAmount: saved.custom_first_installment_amount !== null ? Number(saved.custom_first_installment_amount) : null,
+        customSecondInstallmentAmount: saved.custom_second_installment_amount !== null ? Number(saved.custom_second_installment_amount) : null,
+        firstInstallmentReal: saved.first_installment_real !== null ? Number(saved.first_installment_real) : null,
+        secondInstallmentReal: saved.second_installment_real !== null ? Number(saved.second_installment_real) : null,
+        firstInstallmentDate: saved.first_installment_date || null,
+        secondInstallmentDate: saved.second_installment_date || null,
+        firstInstallmentTransactionId: saved.first_installment_transaction_id || null,
+        secondInstallmentTransactionId: saved.second_installment_transaction_id || null,
+        notes: saved.notes || '',
+      },
+    });
+  } catch (error) {
+    console.error('Erro em POST /api/salary/thirteenth:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/salary/vacation', async (req, res) => {
+  try {
+    const db = await initDb();
+    const userId = req.userId;
+    const {
+      id = randomUUID(),
+      year,
+      vacationDays = 30,
+      sellDays = 0,
+      startDate = '',
+      advanceThirteenth = false,
+      customAmount = null,
+      realAmount = null,
+      paymentDate = null,
+      transactionId = null,
+      notes = '',
+    } = req.body;
+
+    if (year === undefined) {
+      return res.status(400).json({ error: 'Ano é obrigatório' });
+    }
+
+    await db.run(
+      `INSERT INTO salary_vacation_configs (
+        id, user_id, year, vacation_days, sell_days,
+        start_date, advance_thirteenth, custom_amount,
+        real_amount, payment_date, transaction_id, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        year = excluded.year,
+        vacation_days = excluded.vacation_days,
+        sell_days = excluded.sell_days,
+        start_date = excluded.start_date,
+        advance_thirteenth = excluded.advance_thirteenth,
+        custom_amount = excluded.custom_amount,
+        real_amount = excluded.real_amount,
+        payment_date = excluded.payment_date,
+        transaction_id = excluded.transaction_id,
+        notes = excluded.notes`,
+      id,
+      userId,
+      Number(year),
+      Number(vacationDays),
+      Number(sellDays),
+      startDate || '',
+      advanceThirteenth ? 1 : 0,
+      customAmount !== null && customAmount !== undefined ? Number(customAmount) : null,
+      realAmount !== null && realAmount !== undefined ? Number(realAmount) : null,
+      paymentDate || null,
+      transactionId || null,
+      notes || ''
+    );
+
+    const saved = await db.get(
+      'SELECT * FROM salary_vacation_configs WHERE id = ?',
+      id
+    );
+
+    res.json({
+      success: true,
+      config: {
+        id: saved.id,
+        year: Number(saved.year),
+        vacationDays: Number(saved.vacation_days),
+        sellDays: Number(saved.sell_days),
+        startDate: saved.start_date || '',
+        advanceThirteenth: Boolean(saved.advance_thirteenth),
+        customAmount: saved.custom_amount !== null ? Number(saved.custom_amount) : null,
+        realAmount: saved.real_amount !== null ? Number(saved.real_amount) : null,
+        paymentDate: saved.payment_date || null,
+        transactionId: saved.transaction_id || null,
+        notes: saved.notes || '',
+      },
+    });
+  } catch (error) {
+    console.error('Erro em POST /api/salary/vacation:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/salary/vacation/:id', async (req, res) => {
+  try {
+    const db = await initDb();
+    const userId = req.userId;
+    const { id } = req.params;
+
+    await db.run('DELETE FROM salary_vacation_configs WHERE user_id = ? AND id = ?', userId, id);
+    res.json({ success: true, id });
+  } catch (error) {
+    console.error('Erro em DELETE /api/salary/vacation/:id:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ----------------------------------------------------
 // Backup & Restore
 // ----------------------------------------------------
 
@@ -1096,6 +1801,12 @@ app.get('/api/backup', async (req, res) => {
       goalContributions,
       customCategories,
       cardMonthlyClosings,
+      salaryConfig,
+      salaryMonthlyRecords,
+      salaryTaxTables,
+      salaryItemizedEntries,
+      salaryThirteenthConfigs,
+      salaryVacationConfigs,
     ] = await Promise.all([
       db.all('SELECT * FROM transactions WHERE user_id = ?', userId),
       db.all('SELECT * FROM recurring_transactions WHERE user_id = ?', userId),
@@ -1111,6 +1822,12 @@ app.get('/api/backup', async (req, res) => {
       db.all('SELECT * FROM goal_contributions WHERE user_id = ?', userId),
       db.all('SELECT * FROM custom_categories WHERE user_id = ?', userId),
       db.all('SELECT * FROM card_monthly_closings WHERE user_id = ?', userId),
+      db.get('SELECT * FROM salary_configs WHERE user_id = ?', userId),
+      db.all('SELECT * FROM salary_monthly_records WHERE user_id = ?', userId),
+      db.all('SELECT * FROM salary_tax_tables WHERE user_id = ?', userId),
+      db.all('SELECT * FROM salary_itemized_entries WHERE user_id = ?', userId),
+      db.all('SELECT * FROM salary_thirteenth_configs WHERE user_id = ? ORDER BY year DESC', userId),
+      db.all('SELECT * FROM salary_vacation_configs WHERE user_id = ? ORDER BY year DESC', userId),
     ]);
 
     const backupPayload = {
@@ -1133,6 +1850,12 @@ app.get('/api/backup', async (req, res) => {
         financialGoals,
         goalContributions,
         customCategories,
+        salaryConfig,
+        salaryMonthlyRecords,
+        salaryTaxTables,
+        salaryItemizedEntries,
+        salaryThirteenthConfigs,
+        salaryVacationConfigs,
       },
       summary: {
         totalTransactions: transactions.length,
@@ -1202,6 +1925,12 @@ app.post('/api/restore', async (req, res) => {
       await db.run('DELETE FROM card_monthly_closings WHERE user_id = ?', userId);
       await db.run('DELETE FROM credit_cards WHERE user_id = ?', userId);
       await db.run('DELETE FROM custom_categories WHERE user_id = ?', userId);
+      await db.run('DELETE FROM salary_monthly_records WHERE user_id = ?', userId);
+      await db.run('DELETE FROM salary_configs WHERE user_id = ?', userId);
+      await db.run('DELETE FROM salary_tax_tables WHERE user_id = ?', userId);
+      await db.run('DELETE FROM salary_itemized_entries WHERE user_id = ?', userId);
+      await db.run('DELETE FROM salary_thirteenth_configs WHERE user_id = ?', userId);
+      await db.run('DELETE FROM salary_vacation_configs WHERE user_id = ?', userId);
 
       // Re-insert transactions
       if (Array.isArray(data.transactions)) {
@@ -1209,8 +1938,8 @@ app.post('/api/restore', async (req, res) => {
           await db.run(
             `INSERT INTO transactions (
               id, user_id, description, amount, date, type, category,
-              payment_method, credit_card_id, installment_id, recurring_id, is_paid, custom_due_date
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              payment_method, credit_card_id, installment_id, recurring_id, is_paid, custom_due_date, tags
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             t.id,
             userId,
             t.description,
@@ -1223,7 +1952,8 @@ app.post('/api/restore', async (req, res) => {
             t.installment_id || t.installmentId || null,
             t.recurring_id || t.recurringId || null,
             t.is_paid !== undefined ? (t.is_paid ? 1 : 0) : (t.isPaid ? 1 : 0),
-            t.custom_due_date || t.customDueDate || null
+            t.custom_due_date || t.customDueDate || null,
+            serializeTags(t.tags)
           );
         }
       }
@@ -1234,8 +1964,8 @@ app.post('/api/restore', async (req, res) => {
           await db.run(
             `INSERT INTO recurring_transactions (
               id, user_id, description, amount, date, type, category,
-              payment_method, credit_card_id, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              payment_method, credit_card_id, status, tags
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             r.id,
             userId,
             r.description,
@@ -1245,7 +1975,8 @@ app.post('/api/restore', async (req, res) => {
             r.category,
             r.payment_method || r.paymentMethod,
             r.credit_card_id || r.creditCardId || null,
-            r.status || 'active'
+            r.status || 'active',
+            serializeTags(r.tags)
           );
         }
       }
@@ -1460,6 +2191,163 @@ app.post('/api/restore', async (req, res) => {
         }
       }
 
+      // Re-insert salary config
+      if (data.salaryConfig) {
+        const sc = data.salaryConfig;
+        await db.run(
+          `INSERT INTO salary_configs (
+            id, user_id, gross_salary, dependents, other_deductions,
+            advance_percentage, advance_day, payday_day,
+            use_custom_advance, custom_advance_amount, is_active,
+            use_custom_taxes, custom_inss_amount, custom_irrf_amount, tax_year
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          sc.id || randomUUID(),
+          userId,
+          sc.gross_salary !== undefined ? sc.gross_salary : (sc.grossSalary || 0),
+          sc.dependents !== undefined ? sc.dependents : (sc.dependents || 0),
+          sc.other_deductions !== undefined ? sc.other_deductions : (sc.otherDeductions || 0),
+          sc.advance_percentage !== undefined ? sc.advance_percentage : (sc.advancePercentage || 40),
+          sc.advance_day !== undefined ? sc.advance_day : (sc.advanceDay || 20),
+          sc.payday_day !== undefined ? sc.payday_day : (sc.paydayDay || 5),
+          sc.use_custom_advance !== undefined ? (sc.use_custom_advance ? 1 : 0) : (sc.useCustomAdvance ? 1 : 0),
+          sc.custom_advance_amount !== undefined ? sc.custom_advance_amount : (sc.customAdvanceAmount || 0),
+          sc.is_active !== undefined ? (sc.is_active ? 1 : 0) : (sc.isActive !== false ? 1 : 0),
+          sc.use_custom_taxes !== undefined ? (sc.use_custom_taxes ? 1 : 0) : (sc.useCustomTaxes ? 1 : 0),
+          sc.custom_inss_amount !== undefined ? sc.custom_inss_amount : (sc.customInssAmount || 0),
+          sc.custom_irrf_amount !== undefined ? sc.custom_irrf_amount : (sc.customIrrfAmount || 0),
+          sc.tax_year !== undefined ? sc.tax_year : (sc.taxYear || 2026)
+        );
+      }
+
+      // Re-insert salary monthly records
+      if (Array.isArray(data.salaryMonthlyRecords)) {
+        for (const sr of data.salaryMonthlyRecords) {
+          await db.run(
+            `INSERT INTO salary_monthly_records (
+              id, user_id, year, month, projected_advance, projected_payday,
+              real_advance, real_payday, advance_date, payday_date, notes,
+              advance_transaction_id, payday_transaction_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            sr.id || randomUUID(),
+            userId,
+            sr.year,
+            sr.month,
+            sr.projected_advance !== undefined ? sr.projected_advance : (sr.projectedAdvance || 0),
+            sr.projected_payday !== undefined ? sr.projected_payday : (sr.projectedPayday || 0),
+            sr.real_advance !== undefined ? sr.real_advance : (sr.realAdvance ?? null),
+            sr.real_payday !== undefined ? sr.real_payday : (sr.realPayday ?? null),
+            sr.advance_date || sr.advanceDate || null,
+            sr.payday_date || sr.paydayDate || null,
+            sr.notes || '',
+            sr.advance_transaction_id || sr.advanceTransactionId || null,
+            sr.payday_transaction_id || sr.paydayTransactionId || null
+          );
+        }
+      }
+
+      // Re-insert salary tax tables
+      if (Array.isArray(data.salaryTaxTables)) {
+        for (const tt of data.salaryTaxTables) {
+          await db.run(
+            `INSERT INTO salary_tax_tables (
+              id, user_id, year, inss_brackets, inss_ceiling,
+              irrf_brackets, dependent_deduction, simplified_deduction
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            tt.id || randomUUID(),
+            userId,
+            tt.year,
+            typeof (tt.inss_brackets || tt.inssBrackets) === 'string'
+              ? (tt.inss_brackets || tt.inssBrackets)
+              : JSON.stringify(tt.inss_brackets || tt.inssBrackets || []),
+            tt.inss_ceiling !== undefined ? tt.inss_ceiling : (tt.inssCeiling || 0),
+            typeof (tt.irrf_brackets || tt.irrfBrackets) === 'string'
+              ? (tt.irrf_brackets || tt.irrfBrackets)
+              : JSON.stringify(tt.irrf_brackets || tt.irrfBrackets || []),
+            tt.dependent_deduction !== undefined ? tt.dependent_deduction : (tt.dependentDeduction || 0),
+            tt.simplified_deduction !== undefined ? tt.simplified_deduction : (tt.simplifiedDeduction || 0)
+          );
+        }
+      }
+
+      // Re-insert salary itemized entries
+      if (Array.isArray(data.salaryItemizedEntries)) {
+        for (const it of data.salaryItemizedEntries) {
+          await db.run(
+            `INSERT INTO salary_itemized_entries (
+              id, user_id, year, month, type, name, amount, is_recurring, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            it.id || randomUUID(),
+            userId,
+            it.year,
+            it.month,
+            it.type,
+            it.name,
+            it.amount,
+            it.is_recurring !== undefined ? (it.is_recurring ? 1 : 0) : (it.isRecurring ? 1 : 0),
+            it.notes || ''
+          );
+        }
+      }
+
+      // Re-insert salary thirteenth configs
+      if (Array.isArray(data.salaryThirteenthConfigs)) {
+        for (const st of data.salaryThirteenthConfigs) {
+          await db.run(
+            `INSERT INTO salary_thirteenth_configs (
+              id, user_id, year, months_worked, first_installment_month,
+              first_installment_percentage, first_installment_pay_day, second_installment_pay_day,
+              custom_first_installment_amount, custom_second_installment_amount,
+              first_installment_real, second_installment_real,
+              first_installment_date, second_installment_date,
+              first_installment_transaction_id, second_installment_transaction_id,
+              notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            st.id || randomUUID(),
+            userId,
+            st.year,
+            st.months_worked !== undefined ? st.months_worked : (st.monthsWorked || 12),
+            st.first_installment_month !== undefined ? st.first_installment_month : (st.firstInstallmentMonth ?? 10),
+            st.first_installment_percentage !== undefined ? st.first_installment_percentage : (st.firstInstallmentPercentage || 50),
+            st.first_installment_pay_day !== undefined ? st.first_installment_pay_day : (st.firstInstallmentPayDay || 30),
+            st.second_installment_pay_day !== undefined ? st.second_installment_pay_day : (st.secondInstallmentPayDay || 20),
+            st.custom_first_installment_amount !== undefined ? st.custom_first_installment_amount : (st.customFirstInstallmentAmount ?? null),
+            st.custom_second_installment_amount !== undefined ? st.custom_second_installment_amount : (st.customSecondInstallmentAmount ?? null),
+            st.first_installment_real !== undefined ? st.first_installment_real : (st.firstInstallmentReal ?? null),
+            st.second_installment_real !== undefined ? st.second_installment_real : (st.secondInstallmentReal ?? null),
+            st.first_installment_date || st.firstInstallmentDate || null,
+            st.second_installment_date || st.secondInstallmentDate || null,
+            st.first_installment_transaction_id || st.firstInstallmentTransactionId || null,
+            st.second_installment_transaction_id || st.secondInstallmentTransactionId || null,
+            st.notes || ''
+          );
+        }
+      }
+
+      // Re-insert salary vacation configs
+      if (Array.isArray(data.salaryVacationConfigs)) {
+        for (const sv of data.salaryVacationConfigs) {
+          await db.run(
+            `INSERT INTO salary_vacation_configs (
+              id, user_id, year, vacation_days, sell_days,
+              start_date, advance_thirteenth, custom_amount,
+              real_amount, payment_date, transaction_id, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            sv.id || randomUUID(),
+            userId,
+            sv.year,
+            sv.vacation_days !== undefined ? sv.vacation_days : (sv.vacationDays || 30),
+            sv.sell_days !== undefined ? sv.sell_days : (sv.sellDays || 0),
+            sv.start_date || sv.startDate || '',
+            sv.advance_thirteenth !== undefined ? (sv.advance_thirteenth ? 1 : 0) : (sv.advanceThirteenth ? 1 : 0),
+            sv.custom_amount !== undefined ? sv.custom_amount : (sv.customAmount ?? null),
+            sv.real_amount !== undefined ? sv.real_amount : (sv.realAmount ?? null),
+            sv.payment_date || sv.paymentDate || null,
+            sv.transaction_id || sv.transactionId || null,
+            sv.notes || ''
+          );
+        }
+      }
+
       await db.run('COMMIT');
 
       res.json({
@@ -1474,6 +2362,9 @@ app.post('/api/restore', async (req, res) => {
           loans: (data.loans || []).length,
           customCategories: (data.customCategories || []).length,
           cardMonthlyClosings: (data.cardMonthlyClosings || []).length,
+          salaryMonthlyRecords: (data.salaryMonthlyRecords || []).length,
+          salaryThirteenthConfigs: (data.salaryThirteenthConfigs || []).length,
+          salaryVacationConfigs: (data.salaryVacationConfigs || []).length,
         },
       });
     } catch (err) {
@@ -1482,6 +2373,55 @@ app.post('/api/restore', async (req, res) => {
     }
   } catch (error) {
     console.error('Erro em POST /api/restore:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Reset all account data
+app.post('/api/reset-data', async (req, res) => {
+  try {
+    const db = await initDb();
+    const userId = req.userId;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Não autorizado.' });
+    }
+
+    await db.run('BEGIN TRANSACTION');
+    try {
+      await db.run('DELETE FROM goal_contributions WHERE user_id = ?', userId);
+      await db.run('DELETE FROM financial_goals WHERE user_id = ?', userId);
+      await db.run('DELETE FROM budgets WHERE user_id = ?', userId);
+      await db.run('DELETE FROM bill_monthly_amounts WHERE user_id = ?', userId);
+      await db.run('DELETE FROM bill_payments WHERE user_id = ?', userId);
+      await db.run('DELETE FROM bills WHERE user_id = ?', userId);
+      await db.run('DELETE FROM loan_payments WHERE user_id = ?', userId);
+      await db.run('DELETE FROM loans WHERE user_id = ?', userId);
+      await db.run('DELETE FROM savings_transactions WHERE user_id = ?', userId);
+      await db.run('DELETE FROM recurring_transactions WHERE user_id = ?', userId);
+      await db.run('DELETE FROM transactions WHERE user_id = ?', userId);
+      await db.run('DELETE FROM card_monthly_closings WHERE user_id = ?', userId);
+      await db.run('DELETE FROM credit_cards WHERE user_id = ?', userId);
+      await db.run('DELETE FROM custom_categories WHERE user_id = ?', userId);
+      await db.run('DELETE FROM salary_monthly_records WHERE user_id = ?', userId);
+      await db.run('DELETE FROM salary_configs WHERE user_id = ?', userId);
+      await db.run('DELETE FROM salary_tax_tables WHERE user_id = ?', userId);
+      await db.run('DELETE FROM salary_itemized_entries WHERE user_id = ?', userId);
+      await db.run('DELETE FROM salary_thirteenth_configs WHERE user_id = ?', userId);
+      await db.run('DELETE FROM salary_vacation_configs WHERE user_id = ?', userId);
+
+      await db.run('COMMIT');
+
+      res.json({
+        success: true,
+        message: 'Todos os dados da conta foram resetados com sucesso.',
+      });
+    } catch (err) {
+      await db.run('ROLLBACK');
+      throw err;
+    }
+  } catch (error) {
+    console.error('Erro em POST /api/reset-data:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -1509,3 +2449,5 @@ const start = async () => {
 };
 
 start();
+
+

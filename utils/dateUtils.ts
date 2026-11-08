@@ -9,6 +9,18 @@ export interface BillInfo {
 }
 
 /**
+ * Returns today's date in 'YYYY-MM-DD' formatted according to the user's local timezone.
+ * Avoids the UTC offset bug where evening hours (e.g. after 21:00 in UTC-3) roll over to tomorrow.
+ */
+export function getTodayLocalDate(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
  * Returns the number of days in a given UTC month (0-indexed).
  */
 export function getDaysInMonth(year: number, month: number): number {

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Transaction, CreditCard, TransactionType, PaymentMethod, Category, Period } from '../types';
-import { getBillInfoForTransaction, parseISODateAsUTC } from '../utils/dateUtils';
+import { Transaction, CreditCard, TransactionType, PaymentMethod, Category, Period, CardMonthlyClosing } from '../types';
+import { getBillInfoForTransaction, parseISODateAsUTC, getEffectiveDueDate } from '../utils/dateUtils';
 import {
   PieChart,
   Pie,
@@ -21,6 +21,7 @@ interface ReportsProps {
   transactions: Transaction[];
   creditCards: CreditCard[];
   allCategories: Category[];
+  cardMonthlyClosings?: CardMonthlyClosing[];
   onCategoryClick: (
     categoryId: string,
     period: Period,
@@ -122,7 +123,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
-const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategories, onCategoryClick }) => {
+const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategories, cardMonthlyClosings = [], onCategoryClick }) => {
   const [period, setPeriod] = useState<Period>('current_month');
   const [dateBasis, setDateBasis] = useState<'purchase' | 'due_date'>('purchase');
   const [categoryType, setCategoryType] = useState<TransactionType>(TransactionType.EXPENSE);
@@ -158,11 +159,11 @@ const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategor
     cardBarChartData,
     monthlyTrendData,
     netWorthEvolutionData,
+    tagList,
+    totalTaggedSpend,
   } = useMemo(() => {
-    // 1. Get effective dates for all transactions
-    // In 'purchase' mode (default), expenses belong to the date the purchase happened (competência).
-    // In 'due_date' mode, credit card expenses are assigned to the bill's due date (caixa).
-    const cardsById = new Map(creditCards.map((c) => [c.id, c]));
+    // 1. Calculate effective dates for all transactions
+    const cardsById = new Map<string, CreditCard>(creditCards.map((c) => [c.id, c]));
     const allEffectiveTransactions = transactions
       .map((t) => {
         let effectiveDate: Date;
@@ -173,13 +174,10 @@ const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategor
           t.type === TransactionType.EXPENSE &&
           (t.paymentMethod === PaymentMethod.CREDIT_CARD || t.creditCardId)
         ) {
-          if (t.customDueDate) {
-            effectiveDate = parseISODateAsUTC(t.customDueDate);
-          } else if (t.creditCardId) {
+          if (t.creditCardId) {
             const card = cardsById.get(t.creditCardId);
             if (card && transactionDateAsUTC && !isNaN(transactionDateAsUTC.getTime())) {
-              const billInfo = getBillInfoForTransaction(card, transactionDateAsUTC);
-              effectiveDate = billInfo.dueDate;
+              effectiveDate = getEffectiveDueDate(t, card, cardMonthlyClosings);
             } else {
               effectiveDate = transactionDateAsUTC;
             }
@@ -427,6 +425,36 @@ const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategor
       ticket: c.avgTicket,
     }));
 
+    // 5.6 Tag Breakdown (Gastos por Tag / Marcador)
+    const tagSpendMap: { [key: string]: { total: number; count: number } } = {};
+    expenses.forEach((t) => {
+      if (t.tags && Array.isArray(t.tags) && t.tags.length > 0) {
+        t.tags.forEach((tag) => {
+          const cleanTag = tag.trim().toLowerCase();
+          if (!cleanTag) return;
+          if (!tagSpendMap[cleanTag]) {
+            tagSpendMap[cleanTag] = { total: 0, count: 0 };
+          }
+          tagSpendMap[cleanTag].total += t.amount;
+          tagSpendMap[cleanTag].count += 1;
+        });
+      }
+    });
+
+    const totalTaggedSpend = Object.values(tagSpendMap).reduce((acc, curr) => acc + curr.total, 0);
+
+    const tagList = Object.entries(tagSpendMap)
+      .map(([tag, data], index) => {
+        return {
+          tag,
+          total: data.total,
+          count: data.count,
+          percentage: sumExpenses > 0 ? (data.total / sumExpenses) * 100 : 0,
+          color: CATEGORY_COLORS[index % CATEGORY_COLORS.length],
+        };
+      })
+      .sort((a, b) => b.total - a.total);
+
     // 6. Monthly Cashflow (BarChart)
     const monthlyTotals: { [key: string]: { income: number; expense: number; year: number; month: number } } = {};
     transactionsInPeriod.forEach((t) => {
@@ -508,8 +536,10 @@ const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategor
       cardBarChartData,
       monthlyTrendData: trendData,
       netWorthEvolutionData: evolutionDataPoints,
+      tagList,
+      totalTaggedSpend,
     };
-  }, [transactions, creditCards, period, dateBasis, customStartDate, customEndDate, categoryType, allCategories]);
+  }, [transactions, creditCards, period, dateBasis, customStartDate, customEndDate, categoryType, allCategories, cardMonthlyClosings]);
 
   const PeriodButton: React.FC<{ p: Period; label: string; icon?: string }> = ({ p, label, icon }) => (
     <button
@@ -1155,6 +1185,85 @@ const Reports: React.FC<ReportsProps> = ({ transactions, creditCards, allCategor
             </div>
             <p className="text-slate-300 text-sm font-semibold">Nenhum gasto com cartão no período.</p>
             <p className="text-xs text-slate-500 mt-1">Nenhuma transação com cartão de crédito foi registrada para o intervalo selecionado.</p>
+          </div>
+        )}
+      </Card>
+
+      {/* Row: Gastos por Marcadores e Tags (#Tags) */}
+      <Card
+        title="Gastos por Marcadores e Tags (#Tags)"
+        icon="fa-hashtag"
+        headerAction={
+          <div className="flex items-center gap-3">
+            {tagList.length > 0 && (
+              <span className="text-xs text-slate-400 font-medium hidden sm:inline">
+                {tagList.length} marcador{tagList.length === 1 ? '' : 'es'} ativo{tagList.length === 1 ? '' : 's'}
+              </span>
+            )}
+            <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-violet-500/15 text-violet-300 border border-violet-500/25 tabular-nums">
+              Total Marcado: {formatCurrency(totalTaggedSpend)}
+            </span>
+          </div>
+        }
+      >
+        {tagList.length > 0 ? (
+          <div className="space-y-4">
+            <p className="text-xs text-slate-400">
+              Despesas categorizadas com marcadores específicos para controle de projetos, viagens ou metas.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {tagList.map((item) => (
+                <div
+                  key={item.tag}
+                  className="p-4 rounded-xl bg-slate-800/40 border border-white/[0.06] hover:border-violet-500/30 transition-all flex flex-col justify-between gap-3 group"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: item.color }}
+                      ></span>
+                      <span className="font-bold text-sm text-violet-300 group-hover:text-white transition-colors truncate">
+                        #{item.tag}
+                      </span>
+                    </div>
+                    <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-slate-800 text-slate-400 tabular-nums flex-shrink-0">
+                      {item.percentage.toFixed(1)}%
+                    </span>
+                  </div>
+
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-[11px] text-slate-400">
+                      {item.count} compra{item.count === 1 ? '' : 's'}
+                    </span>
+                    <span className="font-extrabold text-base text-white tabular-nums">
+                      {formatCurrency(item.total)}
+                    </span>
+                  </div>
+
+                  {/* Progress bar */}
+                  <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                    <div
+                      className="h-1.5 rounded-full transition-all duration-500"
+                      style={{
+                        width: `${Math.min(item.percentage, 100)}%`,
+                        backgroundColor: item.color,
+                      }}
+                    ></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-center flex-col h-48 text-slate-500">
+            <div className="w-12 h-12 rounded-2xl bg-slate-800/80 flex items-center justify-center text-slate-600 mb-3">
+              <i className="fa-solid fa-hashtag text-xl"></i>
+            </div>
+            <p className="text-slate-300 text-sm font-semibold">Nenhum marcador (#tag) utilizado no período.</p>
+            <p className="text-xs text-slate-500 mt-1 max-w-md text-center">
+              Ao adicionar ou editar lançamentos, insira tags como <span className="text-violet-400">#viagem</span>, <span className="text-violet-400">#reforma</span> ou <span className="text-violet-400">#carro</span> para acompanhar seus custos agrupados aqui.
+            </p>
           </div>
         )}
       </Card>

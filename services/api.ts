@@ -14,6 +14,12 @@ import {
   GoalContribution,
   Category,
   CardMonthlyClosing,
+  SalaryConfig,
+  SalaryMonthlyRecord,
+  TaxTableConfig,
+  SalaryItemizedEntry,
+  SalaryThirteenthConfig,
+  SalaryVacationConfig,
 } from '../types';
 
 export interface AllUserData {
@@ -31,6 +37,12 @@ export interface AllUserData {
   financialGoals: FinancialGoal[];
   goalContributions: GoalContribution[];
   customCategories: Category[];
+  salaryConfig: SalaryConfig | null;
+  salaryMonthlyRecords: SalaryMonthlyRecord[];
+  salaryTaxTables: TaxTableConfig[];
+  salaryItemizedEntries: SalaryItemizedEntry[];
+  salaryThirteenthConfigs: SalaryThirteenthConfig[];
+  salaryVacationConfigs: SalaryVacationConfig[];
 }
 
 async function request<T>(endpoint: string, userId: string, options: RequestInit = {}): Promise<T> {
@@ -148,10 +160,18 @@ export const api = {
     }),
 
   // Loans
-  addLoan: (userId: string, data: Omit<Loan, 'id' | 'paidAmount' | 'status'>) =>
+  addLoan: (
+    userId: string,
+    data: Omit<Loan, 'id' | 'paidAmount' | 'status'> & { createTransaction?: boolean }
+  ) =>
     request<{ success: boolean; id: string }>('/api/loans', userId, {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+
+  deleteLoan: (userId: string, loanId: string) =>
+    request<{ success: boolean }>(`/api/loans/${loanId}`, userId, {
+      method: 'DELETE',
     }),
 
   registerLoanPayment: (
@@ -300,10 +320,76 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
+  // Salary Management
+  updateSalaryConfig: (userId: string, config: Partial<SalaryConfig>) =>
+    request<{ success: boolean; config: SalaryConfig }>('/api/salary/config', userId, {
+      method: 'POST',
+      body: JSON.stringify(config),
+    }),
+
+  saveSalaryMonthlyRecord: (userId: string, record: Partial<SalaryMonthlyRecord> & { year: number; month: number }) =>
+    request<{ success: boolean; record: SalaryMonthlyRecord }>('/api/salary/record', userId, {
+      method: 'POST',
+      body: JSON.stringify(record),
+    }),
+
+  saveTaxTable: (userId: string, tableConfig: Partial<TaxTableConfig> & { year: number }) =>
+    request<{ success: boolean; taxTable: TaxTableConfig }>('/api/salary/tax-table', userId, {
+      method: 'POST',
+      body: JSON.stringify(tableConfig),
+    }),
+
+  resetTaxTable: (userId: string, year: number) =>
+    request<{ success: boolean; year: number }>(`/api/salary/tax-table/${year}`, userId, {
+      method: 'DELETE',
+    }),
+
+  saveSalaryItem: (
+    userId: string,
+    item: Partial<SalaryItemizedEntry> & {
+      year: number;
+      month: number;
+      type: 'earning' | 'deduction';
+      name: string;
+      amount: number;
+    }
+  ) =>
+    request<{ success: boolean; item: SalaryItemizedEntry }>('/api/salary/item', userId, {
+      method: 'POST',
+      body: JSON.stringify(item),
+    }),
+
+  deleteSalaryItem: (userId: string, id: string) =>
+    request<{ success: boolean; id: string }>(`/api/salary/item/${id}`, userId, {
+      method: 'DELETE',
+    }),
+
+  saveThirteenthConfig: (userId: string, config: Partial<SalaryThirteenthConfig> & { year: number }) =>
+    request<{ success: boolean; config: SalaryThirteenthConfig }>('/api/salary/thirteenth', userId, {
+      method: 'POST',
+      body: JSON.stringify(config),
+    }),
+
+  saveVacationConfig: (userId: string, config: Partial<SalaryVacationConfig> & { year: number }) =>
+    request<{ success: boolean; config: SalaryVacationConfig }>('/api/salary/vacation', userId, {
+      method: 'POST',
+      body: JSON.stringify(config),
+    }),
+
+  deleteVacationConfig: (userId: string, id: string) =>
+    request<{ success: boolean; id: string }>(`/api/salary/vacation/${id}`, userId, {
+      method: 'DELETE',
+    }),
+
   restoreBackup: (userId: string, backup: any) =>
     request<RestoreResponse>('/api/restore', userId, {
       method: 'POST',
       body: JSON.stringify({ backup }),
+    }),
+
+  resetAllData: (userId: string) =>
+    request<{ success: boolean; message: string }>('/api/reset-data', userId, {
+      method: 'POST',
     }),
 };
 
@@ -327,6 +413,12 @@ export interface BackupPayload {
     financialGoals: any[];
     goalContributions: any[];
     customCategories: any[];
+    salaryConfig?: any;
+    salaryMonthlyRecords?: any[];
+    salaryTaxTables?: any[];
+    salaryItemizedEntries?: any[];
+    salaryThirteenthConfigs?: any[];
+    salaryVacationConfigs?: any[];
   };
   summary: {
     totalTransactions: number;
