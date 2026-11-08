@@ -1,3 +1,4 @@
+import { auth } from '../firebase/config';
 import {
   Transaction,
   RecurringTransaction,
@@ -33,9 +34,12 @@ export interface AllUserData {
 }
 
 async function request<T>(endpoint: string, userId: string, options: RequestInit = {}): Promise<T> {
+  const user=auth.currentUser;
+  if (!user || user.uid !== userId) throw new Error('Sessão inválida. Entre novamente.');
+  const token=await user.getIdToken();
   const headers = {
     'Content-Type': 'application/json',
-    'x-user-id': userId,
+    Authorization: `Bearer ${token}`,
     ...(options.headers || {}),
   };
 
@@ -273,9 +277,12 @@ export const api = {
   },
 
   downloadSqliteDb: async (userId: string) => {
+    const user=auth.currentUser;
+    if (!user || user.uid !== userId) throw new Error('Sessão inválida. Entre novamente.');
+    const token=await user.getIdToken();
     const response = await fetch('/api/backup/sqlite', {
       headers: {
-        'x-user-id': userId,
+        Authorization: `Bearer ${token}`,
       },
     });
     if (!response.ok) {

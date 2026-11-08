@@ -28,3 +28,8 @@ data/
 *.sqlite*
 *.db*
 scratch/
+
+# Server credentials
+secrets/
+*service-account*.json
+*firebase-adminsdk*.json

@@ -1,3 +1,7 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { initializeApp, applicationDefault } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
 import express from 'express';
 import cors from 'cors';
 import { randomUUID } from 'crypto';
@@ -9,14 +13,25 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-// User authentication header middleware
-const requireUser = (req, res, next) => {
-  const userId = req.headers['x-user-id'];
-  if (!userId) {
-    return res.status(401).json({ error: 'Usuário não autenticado' });
+// Local token verification needs only the project ID and Google's public keys.
+// Revocation checks query the Admin API and require server credentials.
+const checkRevoked = process.env.NODE_ENV === 'production' || Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+initializeApp({
+  projectId: process.env.FIREBASE_PROJECT_ID || 'finance-64bfd',
+  ...(checkRevoked ? { credential: applicationDefault() } : {}),
+});
+app.get('/health', (_req,res) => res.json({status:'ok'}));
+const requireUser = async (req,res,next) => {
+  const match = /^Bearer (\S+)$/.exec(req.headers.authorization || '');
+  if (!match) return res.status(401).json({error:'Usuário não autenticado'});
+  try {
+    const token = await getAuth().verifyIdToken(match[1], checkRevoked);
+    req.userId=token.uid;
+    next();
+  } catch(error) {
+    console.error('Falha na autenticação:',error.code || 'unknown');
+    res.status(401).json({error:'Sessão inválida. Entre novamente.'});
   }
-  req.userId = String(userId);
-  next();
 };
 
 app.use('/api', requireUser);
@@ -1144,6 +1159,7 @@ app.get('/api/backup', async (req, res) => {
 
 // 2. Download raw SQLite file (with WAL checkpoint)
 app.get('/api/backup/sqlite', async (req, res) => {
+  if (!process.env.ADMIN_USER_ID || req.userId !== process.env.ADMIN_USER_ID) return res.status(403).json({error:'Backup completo restrito ao administrador. Use o backup JSON da sua conta.'});
   try {
     const db = await initDb();
     await db.run('PRAGMA wal_checkpoint(TRUNCATE);');
@@ -1470,6 +1486,11 @@ app.post('/api/restore', async (req, res) => {
   }
 });
 
+app.use('/api', (_req,res) => res.status(404).json({error:'Rota não encontrada'}));
+const distDir=path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dist');
+app.use(express.static(distDir));
+app.get('/{*splat}', (_req,res) => res.sendFile(path.join(distDir,'index.html')));
+
 // Start server
 const start = async () => {
   try {
@@ -1488,4 +1509,3 @@ const start = async () => {
 };
 
 start();
-
